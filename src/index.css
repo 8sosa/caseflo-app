@@ -1,0 +1,89 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+
+@theme {
+  --font-sans: "Geist Variable", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-bg: #f1f5f9;
+  --color-card-bg: #ffffff;
+  --color-primary: #0f172a;
+  --color-accent: #2563eb;
+  --color-accent-foreground: #ffffff;
+  --color-text-main: #0f172a;
+  --color-text-muted: #475569;
+  --color-border-theme: #cbd5e1;
+  --color-border: #cbd5e1;
+  --color-ring: #2563eb;
+  --color-background: #f1f5f9;
+  --color-foreground: #0f172a;
+  --color-success-theme: #059669;
+
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+  --radius-2xl: 2rem;
+}
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+    --background: #f1f5f9;
+    --foreground: #0f172a;
+    --card: #ffffff;
+    --card-foreground: #0f172a;
+    --popover: #ffffff;
+    --popover-foreground: #0f172a;
+    --primary: #0f172a;
+    --primary-foreground: #ffffff;
+    --secondary: #f1f5f9;
+    --secondary-foreground: #0f172a;
+    --muted: #f1f5f9;
+    --muted-foreground: #475569;
+    --accent: #2563eb;
+    --accent-foreground: #ffffff;
+    --destructive: #ef4444;
+    --border: #cbd5e1;
+    --input: #cbd5e1;
+    --ring: #2563eb;
+    --radius: 1rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-bg text-text-main antialiased font-sans;
+  }
+}
+
+@layer components {
+  .bento-card {
+    @apply bg-card-bg rounded-2xl border border-border-theme p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col transition-all hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] hover:border-accent/10;
+  }
+  
+  .card-title-theme {
+    @apply text-[11px] font-bold text-slate-500 uppercase tracking-[1px] mb-4;
+  }
+  
+  .big-stat-theme {
+    @apply text-[36px] font-extrabold text-primary leading-tight tracking-tight;
+  }
+  
+  .stat-sub-theme {
+    @apply text-[13px] text-success-theme mt-1 font-semibold;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
+  }
+}
+

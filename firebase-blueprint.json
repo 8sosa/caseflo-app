@@ -1,0 +1,189 @@
+{
+  "entities": {
+    "Matter": {
+      "title": "Matter",
+      "description": "A legal matter.",
+      "type": "object",
+      "properties": {
+        "source": { "type": "string", "enum": ["local", "arag", "legalease", "metlife", "marble", "mytraffictickets"] },
+        "sourceId": { "type": "string", "description": "ID in the source system" },
+        "title": { "type": "string" },
+        "clientName": { "type": "string" },
+        "clientEmail": { "type": "string" },
+        "caseNumber": { "type": "string" },
+        "status": { "type": "string", "enum": ["open", "closed", "pending", "new_lead"] },
+        "courtName": { "type": "string" },
+        "courtState": { "type": "string" },
+        "lawyerInCharge": { "type": "string" },
+        "matterType": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "clientName", "source"]
+    },
+    "LeadSource": {
+      "title": "LeadSource",
+      "description": "Configuration for external lead sources.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "source": { "type": "string", "enum": ["arag", "legalease", "metlife", "marble", "mytraffictickets"] },
+        "apiKey": { "type": "string" },
+        "connected": { "type": "boolean" },
+        "lastSync": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "source", "connected"]
+    },
+    "Filing": {
+      "title": "Filing",
+      "description": "An e-filing record.",
+      "type": "object",
+      "properties": {
+        "matterId": { "type": "string" },
+        "court": { "type": "string" },
+        "documentType": { "type": "string" },
+        "status": { "type": "string", "enum": ["draft", "submitted", "accepted", "rejected"] },
+        "submissionDate": { "type": "string", "format": "date-time" },
+        "confirmationNumber": { "type": "string" }
+      },
+      "required": ["matterId", "court", "documentType", "status"]
+    },
+    "ServiceRequest": {
+      "title": "ServiceRequest",
+      "description": "A process serving request.",
+      "type": "object",
+      "properties": {
+        "matterId": { "type": "string" },
+        "recipientName": { "type": "string" },
+        "address": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "out-for-service", "served", "failed"] },
+        "serviceDate": { "type": "string", "format": "date-time" }
+      },
+      "required": ["matterId", "recipientName", "address", "status"]
+    },
+    "Integration": {
+      "title": "Integration",
+      "description": "Integration settings and tokens.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "connected": { "type": "boolean" }
+      },
+      "required": ["userId", "connected"]
+    },
+    "CaseTemplate": {
+      "title": "CaseTemplate",
+      "description": "A template for common filing types.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string", "description": "Template name" },
+        "court": { "type": "string" },
+        "documentType": { "type": "string" },
+        "defaultStatus": { "type": "string", "enum": ["draft", "submitted"] }
+      },
+      "required": ["userId", "name", "court", "documentType"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "A scheduled legal appointment.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "matterId": { "type": "string" },
+        "matterTitle": { "type": "string" },
+        "clientName": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["consultation", "court_hearing", "meeting"] },
+        "status": { "type": "string", "enum": ["scheduled", "completed", "cancelled"] },
+        "notes": { "type": "string" }
+      },
+      "required": ["uid", "matterId", "date", "type", "status"]
+    },
+    "FollowUp": {
+      "title": "FollowUp",
+      "description": "A client follow-up task.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "matterId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "lastContact": { "type": "string", "format": "date-time" },
+        "nextFollowUp": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["pending", "completed"] },
+        "notes": { "type": "string" }
+      },
+      "required": ["uid", "matterId", "nextFollowUp", "status"]
+    },
+    "CaseUpdate": {
+      "title": "CaseUpdate",
+      "description": "A chronological update recorded for a matter.",
+      "type": "object",
+      "properties": {
+        "matterId": { "type": "string" },
+        "content": { "type": "string" },
+        "author": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["matterId", "content", "author", "createdAt"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "A billing invoice for legal services in Naira.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "matterId": { "type": "string" },
+        "matterTitle": { "type": "string" },
+        "clientName": { "type": "string" },
+        "clientEmail": { "type": "string" },
+        "senderEmail": { "type": "string" },
+        "amount": { "type": "number", "description": "Amount in Naira (₦)" },
+        "currency": { "type": "string", "enum": ["NGN"] },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["draft", "sent", "paid"] },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "matterId", "amount", "currency", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/matters/{matterId}": {
+      "schema": "Matter",
+      "description": "Collection of legal matters."
+    },
+    "/filings/{filingId}": {
+      "schema": "Filing",
+      "description": "Collection of e-filing records."
+    },
+    "/serviceRequests/{requestId}": {
+      "schema": "ServiceRequest",
+      "description": "Collection of process serving requests."
+    },
+    "/integrations/{userId}": {
+      "schema": "Integration",
+      "description": "User-specific integration settings."
+    },
+    "/caseTemplates/{templateId}": {
+      "schema": "CaseTemplate",
+      "description": "User-defined templates for common filings."
+    },
+    "/appointments/{appointmentId}": {
+      "schema": "Appointment",
+      "description": "Collection of appointments."
+    },
+    "/followUps/{followUpId}": {
+      "schema": "FollowUp",
+      "description": "Collection of client follow-ups."
+    },
+    "/caseUpdates/{updateId}": {
+      "schema": "CaseUpdate",
+      "description": "Collection of matter updates."
+    },
+    "/invoices/{invoiceId}": {
+      "schema": "Invoice",
+      "description": "Collection of billing invoices."
+    }
+  }
+}
