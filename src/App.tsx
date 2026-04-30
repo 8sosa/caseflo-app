@@ -341,7 +341,7 @@ const WorkspaceSignIn = () => {
     } catch (error: any) {
       const code = error.code || '';
       if (code === 'auth/user-not-found' || code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
-        toast.error('No account found — are you a new team member? Switch to "Join workspace" below.');
+        toast.error('Incorrect email or password.');
       } else if (code === 'auth/too-many-requests') {
         toast.error('Too many attempts. Try again in a few minutes.');
       } else {
@@ -872,21 +872,21 @@ const SubscriptionBanner = ({ organization, onUpgrade }: { organization: Organiz
   if (daysLeft <= 0) return null;
 
   return (
-    <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-6">
-      <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-6">
+      <div className="flex items-center gap-2 min-w-0">
         <Star size={14} className="text-amber-600 shrink-0" />
-        <p className="text-xs font-bold text-amber-800">
-          Free trial — <span className="font-black">{Math.floor(daysLeft)} days</span> remaining. Subscribe to keep your workspace active.
+        <p className="text-xs font-bold text-amber-800 leading-snug">
+          Free trial — <span className="font-black">{Math.floor(daysLeft)} day{Math.floor(daysLeft) !== 1 ? 's' : ''}</span> remaining.
         </p>
       </div>
-      <Button size="sm" onClick={onUpgrade} className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg shrink-0">
-        Upgrade
+      <Button size="sm" onClick={onUpgrade} className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg shrink-0 h-7 px-3">
+        Upgrade Plan
       </Button>
     </div>
   );
 };
 
-const Dashboard = ({ matters, appointments, followUps }: { matters: Matter[], appointments: Appointment[], followUps: FollowUp[] }) => {
+const Dashboard = ({ matters, appointments, followUps, onNavigate }: { matters: Matter[], appointments: Appointment[], followUps: FollowUp[], onNavigate: (tab: string) => void }) => {
   const newLeads = matters.filter(m => m.status === 'new_lead');
   const activeCases = matters.filter(m => m.status === 'open');
   const todayAppointments = appointments.filter(a => {
@@ -980,8 +980,8 @@ const Dashboard = ({ matters, appointments, followUps }: { matters: Matter[], ap
         <div className="bento-card bg-white">
           <div className="card-title-theme">Quick Actions</div>
           <div className="grid grid-cols-2 gap-2 mt-2">
-            <Button variant="outline" size="sm" className="text-[10px] font-bold h-8 rounded-lg">New Intake</Button>
-            <Button variant="outline" size="sm" className="text-[10px] font-bold h-8 rounded-lg">Schedule Appointment</Button>
+            <Button variant="outline" size="sm" onClick={() => onNavigate('matters')} className="text-[10px] font-bold h-9 rounded-lg">New Case</Button>
+            <Button variant="outline" size="sm" onClick={() => onNavigate('appointments')} className="text-[10px] font-bold h-9 rounded-lg">Schedule</Button>
           </div>
         </div>
       </div>
@@ -989,7 +989,7 @@ const Dashboard = ({ matters, appointments, followUps }: { matters: Matter[], ap
   );
 };
 
-const MattersList = ({ matters }: { matters: Matter[] }) => {
+const MattersList = ({ matters, orgId }: { matters: Matter[], orgId: string }) => {
   const [showNewMatter, setShowNewMatter] = useState(false);
   const [selectedMatter, setSelectedMatter] = useState<Matter | null>(null);
   const [newUpdate, setNewUpdate] = useState('');
@@ -1019,6 +1019,7 @@ const MattersList = ({ matters }: { matters: Matter[] }) => {
       await addDoc(collection(db, path), {
         ...newMatter,
         uid: auth.currentUser?.uid,
+        orgId,
         source: 'local',
         updatedAt: serverTimestamp()
       });
@@ -1063,14 +1064,14 @@ const MattersList = ({ matters }: { matters: Matter[] }) => {
   return (
     <div className="space-y-6">
       <div className="bento-card bg-white">
-        <div className="flex flex-row items-center justify-between mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
           <div>
             <h2 className="text-xl font-bold text-primary">Case Monitoring</h2>
             <p className="text-sm text-text-muted">Track status, location, and assigned lawyers</p>
           </div>
-          <button onClick={() => setShowNewMatter(true)} className="bg-primary text-white gap-2 rounded-xl px-6 font-bold">
+          <Button onClick={() => setShowNewMatter(true)} className="bg-primary hover:bg-primary/90 text-white flex items-center gap-2 rounded-xl px-5 h-10 font-bold shrink-0">
             <Plus size={14}/> Add New Case
-          </button>
+          </Button>
         </div>
         
         <div className="relative mb-6">
@@ -1247,7 +1248,7 @@ const MattersList = ({ matters }: { matters: Matter[] }) => {
   );
 };
 
-const IntakesList = ({ matters }: { matters: Matter[] }) => {
+const IntakesList = ({ matters, orgId }: { matters: Matter[], orgId: string }) => {
   const intakes = matters.filter(m => m.status === 'new_lead');
   const [selectedIntake, setSelectedIntake] = useState<Matter | null>(null);
   const [assignedLawyer, setAssignedLawyer] = useState('');
@@ -1351,7 +1352,7 @@ const IntakesList = ({ matters }: { matters: Matter[] }) => {
   );
 };
 
-const AppointmentsList = ({ appointments, matters }: { appointments: Appointment[], matters: Matter[] }) => {
+const AppointmentsList = ({ appointments, matters, orgId }: { appointments: Appointment[], matters: Matter[], orgId: string }) => {
   const [showNewApp, setShowNewApp] = useState(false);
   const [newApp, setNewApp] = useState({
     matterId: '',
@@ -1377,6 +1378,7 @@ const AppointmentsList = ({ appointments, matters }: { appointments: Appointment
     try {
       await addDoc(collection(db, path), {
         uid: auth.currentUser?.uid,
+        orgId,
         matterId: newApp.matterId,
         matterTitle: matter?.title || 'General',
         clientName: matter?.clientName || 'Client',
@@ -1395,9 +1397,9 @@ const AppointmentsList = ({ appointments, matters }: { appointments: Appointment
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-bold uppercase tracking-widest text-text-muted">Calendar & Appointments</h2>
-        <Button onClick={() => setShowNewApp(true)} className="bg-accent text-white font-bold rounded-xl px-6 shadow-lg shadow-accent/20 gap-2">
+        <Button onClick={() => setShowNewApp(true)} className="bg-accent text-white font-bold rounded-xl px-5 h-10 shadow-lg shadow-accent/20 flex items-center gap-2 shrink-0">
           <Plus size={16} /> Schedule Appointment
         </Button>
       </div>
@@ -1511,7 +1513,7 @@ const AppointmentsList = ({ appointments, matters }: { appointments: Appointment
   );
 };
 
-const FollowUpsList = ({ followUps, matters }: { followUps: FollowUp[], matters: Matter[] }) => {
+const FollowUpsList = ({ followUps, matters, orgId }: { followUps: FollowUp[], matters: Matter[], orgId: string }) => {
   const [showNewFollowUp, setShowNewFollowUp] = useState(false);
   const [newFollowUp, setNewFollowUp] = useState({
     matterId: '',
@@ -1533,6 +1535,7 @@ const FollowUpsList = ({ followUps, matters }: { followUps: FollowUp[], matters:
     try {
       await addDoc(collection(db, path), {
         uid: auth.currentUser?.uid,
+        orgId,
         matterId: newFollowUp.matterId,
         clientName: matter?.clientName || 'Client',
         lastContact: serverTimestamp(),
@@ -1563,9 +1566,9 @@ const FollowUpsList = ({ followUps, matters }: { followUps: FollowUp[], matters:
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-bold uppercase tracking-widest text-text-muted">Client Follow-ups</h2>
-        <Button onClick={() => setShowNewFollowUp(true)} className="bg-accent text-white font-bold rounded-xl px-6 shadow-lg shadow-accent/20 gap-2">
+        <Button onClick={() => setShowNewFollowUp(true)} className="bg-accent text-white font-bold rounded-xl px-5 h-10 shadow-lg shadow-accent/20 flex items-center gap-2 shrink-0">
           <Plus size={16} /> New Follow-up
         </Button>
       </div>
@@ -1636,7 +1639,7 @@ const FollowUpsList = ({ followUps, matters }: { followUps: FollowUp[], matters:
   );
 };
 
-const BillingPage = ({ invoices, matters }: { invoices: Invoice[], matters: Matter[] }) => {
+const BillingPage = ({ invoices, matters, orgId }: { invoices: Invoice[], matters: Matter[], orgId: string }) => {
   const [showNewInvoice, setShowNewInvoice] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [newInvoice, setNewInvoice] = useState({
@@ -1662,6 +1665,7 @@ const BillingPage = ({ invoices, matters }: { invoices: Invoice[], matters: Matt
       const path = 'invoices';
       await addDoc(collection(db, path), {
         uid: auth.currentUser?.uid,
+        orgId,
         matterId: newInvoice.matterId,
         matterTitle: matter?.title || 'General',
         clientName: matter?.clientName || 'Client',
@@ -1713,6 +1717,7 @@ const BillingPage = ({ invoices, matters }: { invoices: Invoice[], matters: Matt
     try {
       await addDoc(collection(db, 'emails'), {
         uid: auth.currentUser?.uid,
+        orgId,
         recipient: invoice.clientEmail,
         subject: `Payment Reminder: Caseflo Law Invoice #NG-${invoice.id.slice(0,6).toUpperCase()}`,
         body: `Dear ${invoice.clientName}, this is a reminder regarding your outstanding payment for ${invoice.matterTitle} in the amount of ₦${invoice.amount}. Please clear this as soon as possible.`,
@@ -1754,9 +1759,9 @@ const BillingPage = ({ invoices, matters }: { invoices: Invoice[], matters: Matt
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-bold uppercase tracking-widest text-text-muted">Financial Records</h2>
-        <Button onClick={() => setShowNewInvoice(true)} className="bg-accent text-white font-bold rounded-xl px-6 shadow-lg shadow-accent/20 gap-2">
+        <Button onClick={() => setShowNewInvoice(true)} className="bg-accent text-white font-bold rounded-xl px-5 h-10 shadow-lg shadow-accent/20 flex items-center gap-2 shrink-0">
           <FileBadge size={16} /> Generate Invoice
         </Button>
       </div>
@@ -1963,7 +1968,7 @@ const SUPPORTED_EFILING_COURTS = [
   ...NIGERIAN_STATES.map(s => `${s.name} ${s.name === 'FCT Abuja' ? '' : 'State'} High Court`)
 ].sort();
 
-const EFilingsPage = ({ filings }: { filings: EFiling[] }) => {
+const EFilingsPage = ({ filings, orgId }: { filings: EFiling[], orgId: string }) => {
   const [showNewFiling, setShowNewFiling] = useState(false);
   const [newFiling, setNewFiling] = useState({
     caseType: '',
@@ -1985,6 +1990,7 @@ const EFilingsPage = ({ filings }: { filings: EFiling[] }) => {
       const path = 'filings';
       await addDoc(collection(db, path), {
         uid: auth.currentUser?.uid,
+        orgId,
         caseType: newFiling.caseType,
         caseNumber: newFiling.caseNumber,
         court: newFiling.court,
@@ -2008,9 +2014,9 @@ const EFilingsPage = ({ filings }: { filings: EFiling[] }) => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-bold uppercase tracking-widest text-text-muted">E-Filing Portal</h2>
-        <Button onClick={() => setShowNewFiling(true)} className="bg-accent text-white font-bold rounded-xl px-6 shadow-lg shadow-accent/20 gap-2">
+        <Button onClick={() => setShowNewFiling(true)} className="bg-accent text-white font-bold rounded-xl px-5 h-10 shadow-lg shadow-accent/20 flex items-center gap-2 shrink-0">
           <FileUp size={16} /> New Filing
         </Button>
       </div>
@@ -2147,7 +2153,7 @@ const EFilingsPage = ({ filings }: { filings: EFiling[] }) => {
   );
 };
 
-const TemplatesPage = ({ templates }: { templates: CaseTemplate[] }) => {
+const TemplatesPage = ({ templates, orgId }: { templates: CaseTemplate[], orgId: string }) => {
   const [showNew, setShowNew] = useState(false);
   const [newTemplate, setNewTemplate] = useState({ name: '', court: '', documentType: '', defaultStatus: 'draft' });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -2275,7 +2281,7 @@ const TemplatesPage = ({ templates }: { templates: CaseTemplate[] }) => {
   );
 };
 
-const VettingPage = ({ results, matters }: { results: CaseVetting[], matters: Matter[] }) => {
+const VettingPage = ({ results, matters, orgId }: { results: CaseVetting[], matters: Matter[], orgId: string }) => {
   const [isVetting, setIsVetting] = useState(false);
   
   const handleManualVetting = async (matterId: string) => {
@@ -2295,6 +2301,7 @@ const VettingPage = ({ results, matters }: { results: CaseVetting[], matters: Ma
       
       await addDoc(collection(db, 'vetting'), {
         uid: auth.currentUser?.uid,
+        orgId,
         matterId,
         riskScore: 100 - score,
         successProbability: prob,
@@ -2312,7 +2319,7 @@ const VettingPage = ({ results, matters }: { results: CaseVetting[], matters: Ma
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-bold uppercase tracking-widest text-text-muted">Automated Case Vetting</h2>
       </div>
       
@@ -2407,7 +2414,7 @@ const VettingPage = ({ results, matters }: { results: CaseVetting[], matters: Ma
 const AutomationPage = ({ emails }: { emails: AutomatedEmail[] }) => {
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-bold uppercase tracking-widest text-text-muted">Automated Communications</h2>
         <Badge className="bg-green-100 text-green-700 border-none font-bold">Email Processor Active</Badge>
       </div>
@@ -2479,7 +2486,7 @@ const AutomationPage = ({ emails }: { emails: AutomatedEmail[] }) => {
   );
 };
 
-const OnboardingPage = ({ agreements, matters }: { agreements: EngagementAgreement[], matters: Matter[] }) => {
+const OnboardingPage = ({ agreements, matters, orgId }: { agreements: EngagementAgreement[], matters: Matter[], orgId: string }) => {
   const [showNew, setShowNew] = useState(false);
   const [newAgreement, setNewAgreement] = useState({ clientName: '', clientEmail: '', matterId: '', content: '' });
 
@@ -2493,6 +2500,7 @@ const OnboardingPage = ({ agreements, matters }: { agreements: EngagementAgreeme
       
       await addDoc(collection(db, 'agreements'), {
         uid: user.uid,
+        orgId,
         clientName: newAgreement.clientName,
         clientEmail: newAgreement.clientEmail,
         matterId: newAgreement.matterId || null,
@@ -2500,10 +2508,11 @@ const OnboardingPage = ({ agreements, matters }: { agreements: EngagementAgreeme
         status: 'sent',
         createdAt: serverTimestamp()
       });
-      
+
       // Also queue a welcome email
       await addDoc(collection(db, 'emails'), {
         uid: user.uid,
+        orgId,
         recipient: newAgreement.clientEmail,
         subject: `Welcome to Caseflo Law - ${newAgreement.clientName}`,
         body: `Dear ${newAgreement.clientName}, we are pleased to represent you. Please sign the agreement attached to this email portal link.`,
@@ -2522,10 +2531,10 @@ const OnboardingPage = ({ agreements, matters }: { agreements: EngagementAgreeme
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-bold uppercase tracking-widest text-text-muted">Client Onboarding</h2>
-        <Button onClick={() => setShowNew(true)} className="bg-accent text-white font-bold rounded-xl px-6">
-          <UserPlus size={16} className="mr-2" /> New Engagement
+        <Button onClick={() => setShowNew(true)} className="bg-accent text-white font-bold rounded-xl px-5 h-10 flex items-center gap-2 shrink-0">
+          <UserPlus size={16} /> New Engagement
         </Button>
       </div>
 
@@ -2826,7 +2835,7 @@ const SettingsPage = ({
               { key: 'microsoft' as const, label: 'Microsoft Exchange', sub: 'Sync Outlook and Calendars', icon: <LayoutDashboard size={18} className="text-blue-600" /> },
             ].map(({ key, label, sub, icon }) => (
               <div key={key} className={`p-4 rounded-2xl border transition-all ${syncStatus[key] ? 'bg-green-50 border-green-200' : 'bg-bg border-border-theme'}`}>
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 bg-white rounded-full shadow-sm flex items-center justify-center border border-gray-100">{icon}</div>
                     <div>
@@ -3036,7 +3045,7 @@ function AppContent() {
       const verifyPayment = async () => {
         try {
           // CALL REAL VERIFICATION ENDPOINT
-          const res = await axios.get(`/api/payments/verify/${reference}`);
+          const res = await axios.post('/api/payments/verify', { reference });
           if (res.data?.data?.status === 'success') {
             await updateDoc(doc(db, 'invoices', invoiceId), {
               status: 'paid',
@@ -3096,6 +3105,7 @@ function AppContent() {
          const prob = Math.floor(Math.random() * 20) + 70;
          await addDoc(collection(db, 'vetting'), {
             uid: user.uid,
+            orgId: organization?.id || '',
             matterId: latest.id,
             riskScore: 100 - score,
             successProbability: prob,
@@ -3151,6 +3161,16 @@ function AppContent() {
       setOrganization(null);
       setOrgMembers([]);
       setOrgLoading(false);
+      // Clear data so previous account's records don't bleed into next session
+      setMatters([]);
+      setAppointments([]);
+      setFollowUps([]);
+      setInvoices([]);
+      setFilings([]);
+      setTemplates([]);
+      setAgreements([]);
+      setEmails([]);
+      setVettingResults([]);
       return;
     }
 
@@ -3246,67 +3266,72 @@ function AppContent() {
       }
     };
 
+    setOrgLoading(true);
     fetchProfileAndOrg();
+  }, [user]);
 
-    // All data queries now scoped by orgId via uid — we use uid initially for backward compat;
-    // org-shared data will be scoped by orgId once the org is loaded in the effect below.
-    const mattersQ = query(collection(db, 'matters'), where('uid', '==', user.uid));
-    const unsubMatters = onSnapshot(mattersQ, (snap) => {
-      setMatters(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Matter)));
+  // Data subscriptions — keyed on orgId so all org members see shared data
+  useEffect(() => {
+    if (!organization) return;
+
+    const orgId = organization.id;
+
+    // Guest mode: use uid-based queries (no orgId on guest docs)
+    const isGuest = orgId === 'guest_org';
+    const uid = auth.currentUser?.uid || 'guest_user';
+
+    const byOrg = (col: string) =>
+      isGuest
+        ? query(collection(db, col), where('uid', '==', uid))
+        : query(collection(db, col), where('orgId', '==', orgId));
+
+    const unsubMatters = onSnapshot(byOrg('matters'), (snap) => {
+      setMatters(snap.docs.map(d => ({ id: d.id, ...d.data() } as Matter)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'matters'));
 
-    const appQ = query(collection(db, 'appointments'), where('uid', '==', user.uid));
-    const unsubApp = onSnapshot(appQ, (snap) => {
-      setAppointments(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Appointment)));
+    const unsubApp = onSnapshot(byOrg('appointments'), (snap) => {
+      setAppointments(snap.docs.map(d => ({ id: d.id, ...d.data() } as Appointment)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'appointments'));
 
-    const followQ = query(collection(db, 'followUps'), where('uid', '==', user.uid));
-    const unsubFollow = onSnapshot(followQ, (snap) => {
-      setFollowUps(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FollowUp)));
+    const unsubFollow = onSnapshot(byOrg('followUps'), (snap) => {
+      setFollowUps(snap.docs.map(d => ({ id: d.id, ...d.data() } as FollowUp)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'followUps'));
 
-    const invoiceQ = query(collection(db, 'invoices'), where('uid', '==', user.uid));
-    const unsubInvoices = onSnapshot(invoiceQ, (snap) => {
-      setInvoices(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice)));
+    const unsubInvoices = onSnapshot(byOrg('invoices'), (snap) => {
+      setInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as Invoice)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'invoices'));
 
-    const filingsQ = query(collection(db, 'filings'), where('uid', '==', user.uid));
-    const unsubFilings = onSnapshot(filingsQ, (snap) => {
-      setFilings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as EFiling)));
+    const unsubFilings = onSnapshot(byOrg('filings'), (snap) => {
+      setFilings(snap.docs.map(d => ({ id: d.id, ...d.data() } as EFiling)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'filings'));
 
-    const templatesQ = query(collection(db, 'caseTemplates'), where('userId', '==', user.uid));
+    const templatesQ = isGuest
+      ? query(collection(db, 'caseTemplates'), where('userId', '==', uid))
+      : query(collection(db, 'caseTemplates'), where('orgId', '==', orgId));
     const unsubTemplates = onSnapshot(templatesQ, (snap) => {
-      setTemplates(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CaseTemplate)));
+      setTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() } as CaseTemplate)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'caseTemplates'));
 
-    const agreementsQ = query(collection(db, 'agreements'), where('uid', '==', user.uid));
-    const unsubAgreements = onSnapshot(agreementsQ, (snap) => {
-      setAgreements(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as EngagementAgreement)));
+    const unsubAgreements = onSnapshot(byOrg('agreements'), (snap) => {
+      setAgreements(snap.docs.map(d => ({ id: d.id, ...d.data() } as EngagementAgreement)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'agreements'));
 
-    const emailsQ = query(collection(db, 'emails'), where('uid', '==', user.uid), orderBy('scheduledFor', 'desc'));
+    const emailsQ = isGuest
+      ? query(collection(db, 'emails'), where('uid', '==', uid), orderBy('scheduledFor', 'desc'))
+      : query(collection(db, 'emails'), where('orgId', '==', orgId), orderBy('scheduledFor', 'desc'));
     const unsubEmails = onSnapshot(emailsQ, (snap) => {
-      setEmails(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as AutomatedEmail)));
+      setEmails(snap.docs.map(d => ({ id: d.id, ...d.data() } as AutomatedEmail)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'emails'));
 
-    const vettingQ = query(collection(db, 'vetting'), where('uid', '==', user.uid));
-    const unsubVetting = onSnapshot(vettingQ, (snap) => {
-      setVettingResults(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CaseVetting)));
+    const unsubVetting = onSnapshot(byOrg('vetting'), (snap) => {
+      setVettingResults(snap.docs.map(d => ({ id: d.id, ...d.data() } as CaseVetting)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'vetting'));
 
     return () => {
-      if (typeof unsubMatters === 'function') unsubMatters();
-      if (typeof unsubApp === 'function') unsubApp();
-      if (typeof unsubFollow === 'function') unsubFollow();
-      if (typeof unsubInvoices === 'function') unsubInvoices();
-      if (typeof unsubFilings === 'function') unsubFilings();
-      if (typeof unsubTemplates === 'function') unsubTemplates();
-      if (typeof unsubAgreements === 'function') unsubAgreements();
-      if (typeof unsubEmails === 'function') unsubEmails();
-      if (typeof unsubVetting === 'function') unsubVetting();
+      unsubMatters(); unsubApp(); unsubFollow(); unsubInvoices();
+      unsubFilings(); unsubTemplates(); unsubAgreements(); unsubEmails(); unsubVetting();
     };
-  }, [user]);
+  }, [organization]);
 
   if (loading || (user && user.uid !== 'guest_user' && orgLoading && !organization)) {
     return (
@@ -3425,9 +3450,9 @@ function AppContent() {
             <div className="w-10 h-10 bg-accent rounded-xl flex items-center justify-center shadow-lg shadow-accent/20 group-hover:scale-110 transition-transform duration-300">
               <Briefcase className="text-white w-5 h-5" />
             </div>
-            <div>
+            <div className="min-w-0">
               <h1 className="text-lg font-extrabold tracking-tight text-primary leading-tight">Caseflo</h1>
-              {organization && <p className="text-[10px] text-text-muted font-medium truncate max-w-[130px]">{organization.name}</p>}
+              {organization && <p className="text-[10px] text-text-muted font-medium truncate">{organization.name}</p>}
             </div>
           </div>
           <Button variant="ghost" size="icon" className="lg:hidden text-text-muted hover:bg-bg" onClick={() => setIsMobileMenuOpen(false)}>
@@ -3502,21 +3527,15 @@ function AppContent() {
               </div>
             </div>
             
-            <div className="flex flex-wrap items-center gap-2 sm:gap-4 self-start lg:self-auto">
+            <div className="flex items-center gap-2 self-start lg:self-auto">
               {user?.uid === 'guest_user' && (
-                <div className="flex items-center gap-1.5 bg-red-100 text-red-700 px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold border border-red-200 animate-pulse whitespace-nowrap">
-                  <AlertCircle size={14} /> <span className="hidden sm:inline">Guest Mode: No Data Sync</span><span className="sm:hidden">Guest Mode</span>
+                <div className="flex items-center gap-1.5 bg-red-100 text-red-700 px-3 py-1.5 rounded-full text-[10px] font-bold border border-red-200 animate-pulse">
+                  <AlertCircle size={12} /> <span>Demo Mode</span>
                 </div>
               )}
-              <div className="flex items-center gap-1.5 bg-amber-100 text-amber-700 px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold border border-amber-200 whitespace-nowrap">
-                <AlertCircle size={14} /> <span className="hidden sm:inline">Test Mode Active</span><span className="sm:hidden">Test Mode</span>
-              </div>
-              <div className="relative">
-                <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 border-2 border-white rounded-full"></div>
-                <Button variant="outline" size="icon" className="rounded-full border-border-theme bg-white shadow-sm hover:bg-bg transition-colors shrink-0">
-                  <Bell size={18} className="text-text-muted" />
-                </Button>
-              </div>
+              <Button variant="outline" size="icon" className="rounded-full border-border-theme bg-white shadow-sm hover:bg-bg transition-colors shrink-0">
+                <Bell size={18} className="text-text-muted" />
+              </Button>
             </div>
           </header>
 
@@ -3525,21 +3544,21 @@ function AppContent() {
           )}
 
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
-            {activeTab === 'dashboard' && <Dashboard matters={matters} appointments={appointments} followUps={followUps} />}
+            {activeTab === 'dashboard' && <Dashboard matters={matters} appointments={appointments} followUps={followUps} onNavigate={setActiveTab} />}
             {activeTab === 'matters' && (
               <div className="space-y-6">
-                <IntakesList matters={matters} />
-                <MattersList matters={matters} />
+                <IntakesList matters={matters} orgId={organization?.id || ''} />
+                <MattersList matters={matters} orgId={organization?.id || ''} />
               </div>
             )}
-            {activeTab === 'appointments' && <AppointmentsList appointments={appointments} matters={matters} />}
-            {activeTab === 'efiling' && <EFilingsPage filings={filings} />}
-            {activeTab === 'templates' && <TemplatesPage templates={templates} />}
-            {activeTab === 'onboarding' && <OnboardingPage agreements={agreements} matters={matters} />}
+            {activeTab === 'appointments' && <AppointmentsList appointments={appointments} matters={matters} orgId={organization?.id || ''} />}
+            {activeTab === 'efiling' && <EFilingsPage filings={filings} orgId={organization?.id || ''} />}
+            {activeTab === 'templates' && <TemplatesPage templates={templates} orgId={organization?.id || ''} />}
+            {activeTab === 'onboarding' && <OnboardingPage agreements={agreements} matters={matters} orgId={organization?.id || ''} />}
             {activeTab === 'automation' && <AutomationPage emails={emails} />}
-            {activeTab === 'vetting' && <VettingPage results={vettingResults} matters={matters} />}
-            {activeTab === 'followups' && <FollowUpsList followUps={followUps} matters={matters} />}
-            {activeTab === 'billing' && <BillingPage invoices={invoices} matters={matters} />}
+            {activeTab === 'vetting' && <VettingPage results={vettingResults} matters={matters} orgId={organization?.id || ''} />}
+            {activeTab === 'followups' && <FollowUpsList followUps={followUps} matters={matters} orgId={organization?.id || ''} />}
+            {activeTab === 'billing' && <BillingPage invoices={invoices} matters={matters} orgId={organization?.id || ''} />}
             {activeTab === 'subscription' && organization && (
               <SubscriptionManagementPage
                 organization={organization}

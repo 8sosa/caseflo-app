@@ -46,20 +46,26 @@ async function startServer() {
     }
   });
 
-  app.get('/api/payments/verify/:reference', async (req, res) => {
+  // POST (used by frontend) and GET (backward compat) both supported
+  const verifyPayment = async (reference: string, res: any) => {
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    if (!secretKey) return res.status(500).json({ error: 'PAYSTACK_SECRET_KEY is not configured' });
     try {
-      const { reference } = req.params;
-      const secretKey = process.env.PAYSTACK_SECRET_KEY;
-      if (!secretKey) return res.status(500).json({ error: 'PAYSTACK_SECRET_KEY is not configured' });
-
       const response = await axios.get(`${PAYSTACK_VERIFY_URL}/${reference}`, {
         headers: { Authorization: `Bearer ${secretKey}` }
       });
       res.json(response.data);
     } catch (error: any) {
-      console.error('Paystack Verify Error:', error.response?.data || error.message);
       res.status(500).json({ error: 'Failed to verify payment' });
     }
+  };
+
+  app.post('/api/payments/verify', async (req, res) => {
+    await verifyPayment(req.body.reference, res);
+  });
+
+  app.get('/api/payments/verify/:reference', async (req, res) => {
+    await verifyPayment(req.params.reference, res);
   });
 
   // ── Subscription Payments ───────────────────────────────────────────────────

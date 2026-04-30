@@ -1,0 +1,56 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# API routes → Netlify Functions
+[[redirects]]
+  from = "/api/payments/initialize"
+  to = "/.netlify/functions/payments-initialize"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/payments/verify"
+  to = "/.netlify/functions/payments-verify"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/subscriptions/initialize"
+  to = "/.netlify/functions/subscriptions-initialize"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/subscriptions/verify"
+  to = "/.netlify/functions/subscriptions-verify"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/subscriptions/webhook"
+  to = "/.netlify/functions/subscriptions-webhook"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/auth/google/url"
+  to = "/.netlify/functions/auth-google-url"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/auth/microsoft/url"
+  to = "/.netlify/functions/auth-microsoft-url"
+  status = 200
+  force = true
+
+# SPA fallback — must be last
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
