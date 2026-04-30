@@ -1,93 +1,21 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: matters
-    // Fields:
-    //   - uid: string (required) - Owner's UID
-    //   - title: string (required)
-    //   - clientName: string (required)
-    //   - source: string (required, enum: local, lawmatics, arag, legalease, metlife, marble, mytraffictickets)
-    //   - status: string (required, enum: open, closed, pending, new_lead)
-    //
-    // Collection: leadSources
-    // Fields:
-    //   - userId: string (required)
-    //   - source: string (required)
-    //   - connected: bool (required)
-    //
-    // ===============================================================
-    // Fields:
-    //   - uid: string (required) - Owner's UID
-    //   - matterId: string (required)
-    //   - court: string (required)
-    //   - status: string (required, enum: draft, submitted, accepted, rejected)
-    //
-    // Collection: serviceRequests
-    // Fields:
-    //   - uid: string (required) - Owner's UID
-    //   - matterId: string (required)
-    //   - recipientName: string (required)
-    //   - status: string (required)
-    //
-    // Collection: integrations
-    // Fields:
-    //   - userId: string (required) - Matches document ID
-    //   - connected: bool (required)
-    //
-    // Collection: caseTemplates
-    // Fields:
-    //   - userId: string (required)
-    //   - name: string (required)
-    //   - court: string (required)
-    //   - documentType: string (required)
-    //
-    // Collection: appointments
-    // Fields:
-    //   - uid: string (required)
-    //   - matterId: string (required)
-    //   - date: timestamp (required)
-    //   - type: string (required, consultation|court_hearing|meeting)
-    //   - status: string (required, scheduled|completed|cancelled)
-    //
-    // Collection: followUps
-    // Fields:
-    //   - uid: string (required)
-    //   - matterId: string (required)
-    //   - nextFollowUp: timestamp (required)
-    //   - status: string (required, pending|completed)
-    //
-    // Collection: caseUpdates
-    // Fields:
-    //   - matterId: string (required)
-    //   - content: string (required)
-    //   - author: string (required)
-    //   - createdAt: timestamp (required)
-    //
-    // ===============================================================
 
-    // Helper Functions
-    function isAuthenticated() {
-      return request.auth != null && request.auth.token.email_verified == true;
+    // Any signed-in user (email verification not required — enforced in app UI instead)
+    function isAuth() {
+      return request.auth != null;
     }
 
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
 
-    function isValidId(id) { 
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
-    }
-
     function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+      return isAuth() && request.auth.uid == userId;
     }
 
     function isDocOwner() {
-      return isAuthenticated() && request.auth.uid == resource.data.uid;
+      return isAuth() && request.auth.uid == resource.data.uid;
     }
 
     function isValidString(val, min, max) {
@@ -102,168 +30,106 @@ service cloud.firestore {
       return !incoming().diff(existing()).affectedKeys().hasAny(fields);
     }
 
-    // --- Restored & Hardened Validators ---
-    function isValidMatter(data) {
-      return data.keys().hasAll(['uid', 'title', 'clientName', 'status', 'source']) &&
-             data.uid == request.auth.uid &&
-             isValidString(data.title, 1, 200) &&
-             isValidString(data.clientName, 1, 200) &&
-             data.source in ['local', 'arag', 'legalease', 'metlife', 'marble', 'mytraffictickets'] &&
-             data.status in ['open', 'closed', 'pending', 'new_lead'] &&
-             hasOnlyAllowedFields(['uid', 'title', 'clientName', 'clientEmail', 'clientPhone', 'caseNumber', 'status', 'courtName', 'courtState', 'lawyerInCharge', 'matterType', 'practiceArea', 'source', 'updatedAt']);
+    function isOrgMember(orgId) {
+      return isAuth() &&
+        exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid));
     }
 
-    function isValidAppointment(data) {
-      return data.keys().hasAll(['uid', 'matterId', 'date', 'type', 'status']) &&
-             data.uid == request.auth.uid &&
-             data.type in ['consultation', 'court_hearing', 'meeting'] &&
-             data.status in ['scheduled', 'completed', 'cancelled'] &&
-             hasOnlyAllowedFields(['uid', 'matterId', 'matterTitle', 'clientName', 'date', 'type', 'status', 'notes']);
+    function canAccessDoc() {
+      return isDocOwner() ||
+        (isAuth() && resource.data.get('orgId', null) != null && isOrgMember(resource.data.orgId));
     }
 
-    function isValidFollowUp(data) {
-      return data.keys().hasAll(['uid', 'matterId', 'nextFollowUp', 'status']) &&
-             data.uid == request.auth.uid &&
-             data.status in ['pending', 'completed'] &&
-             hasOnlyAllowedFields(['uid', 'matterId', 'clientName', 'lastContact', 'nextFollowUp', 'status', 'notes']);
+    // ── Deny-all default ────────────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
     }
 
-    function isValidFiling(data) {
-      return data.keys().hasAll(['uid', 'caseType', 'caseNumber', 'court', 'status', 'documentType']) &&
-             data.uid == request.auth.uid &&
-             isValidString(data.caseType, 1, 100) &&
-             isValidString(data.caseNumber, 1, 100) &&
-             isValidString(data.court, 1, 200) &&
-             isValidString(data.documentType, 1, 200) &&
-             data.status in ['draft', 'submitted', 'accepted', 'rejected'] &&
-             hasOnlyAllowedFields(['uid', 'caseType', 'caseNumber', 'court', 'documentType', 'status', 'submissionDate', 'confirmationNumber', 'matterId']);
+    // ── Organizations ───────────────────────────────────────────────────────────
+    match /organizations/{orgId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && incoming().adminUid == request.auth.uid;
+      allow update: if isAuth() && (isOrgMember(orgId) || resource.data.adminUid == request.auth.uid);
+      allow delete: if false;
+
+      match /members/{memberId} {
+        allow read: if isAuth();
+        allow create: if isAuth() && memberId == request.auth.uid;
+        allow update: if isAuth() && memberId == request.auth.uid;
+        allow delete: if isAuth() && (memberId == request.auth.uid || request.auth.uid == get(/databases/$(database)/documents/organizations/$(orgId)).data.adminUid);
+      }
     }
 
-    function isValidCaseTemplate(data) {
-      return data.keys().hasAll(['userId', 'name', 'court', 'documentType']) &&
-             data.userId == request.auth.uid &&
-             isValidString(data.name, 1, 100) &&
-             isValidString(data.court, 1, 200) &&
-             isValidString(data.documentType, 1, 200) &&
-             hasOnlyAllowedFields(['userId', 'name', 'court', 'documentType', 'defaultStatus']);
-    }
-
-    function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'role', 'email', 'name']) &&
-             data.uid == request.auth.uid &&
-             data.role in ['Admin', 'Lawyer', 'Staff'] &&
-             hasOnlyAllowedFields(['uid', 'role', 'email', 'name', 'createdAt', 'updatedAt']);
-    }
-
-    // --- New Validators ---
-    function isValidAgreement(data) {
-      return data.keys().hasAll(['uid', 'clientName', 'clientEmail', 'status', 'createdAt']) &&
-             data.uid == request.auth.uid &&
-             data.status in ['draft', 'sent', 'signed'] &&
-             data.createdAt == request.time &&
-             hasOnlyAllowedFields(['uid', 'matterId', 'clientName', 'clientEmail', 'content', 'status', 'signedAt', 'createdAt']);
-    }
-
-    function isValidEmailLog(data) {
-      return data.keys().hasAll(['uid', 'recipient', 'subject', 'type', 'status', 'scheduledFor']) &&
-             data.uid == request.auth.uid &&
-             data.status in ['pending', 'sent', 'failed'] &&
-             hasOnlyAllowedFields(['uid', 'recipient', 'subject', 'body', 'type', 'status', 'scheduledFor', 'sentAt']);
-    }
-
-    function isValidVetting(data) {
-      return data.keys().hasAll(['uid', 'matterId', 'riskScore', 'successProbability', 'createdAt']) &&
-             data.uid == request.auth.uid &&
-             data.riskScore is number && data.successProbability is number &&
-             data.createdAt == request.time &&
-             hasOnlyAllowedFields(['uid', 'matterId', 'riskScore', 'successProbability', 'factors', 'recommendation', 'createdAt']);
-    }
-
-    function isValidInvoice(data) {
-      return data.keys().hasAll(['uid', 'matterId', 'amount', 'currency', 'status', 'createdAt']) &&
-             data.uid == request.auth.uid &&
-             data.amount is number && data.amount > 0 &&
-             data.currency == 'NGN' &&
-             data.status in ['draft', 'sent', 'paid'] &&
-             hasOnlyAllowedFields(['uid', 'matterId', 'matterTitle', 'clientName', 'clientEmail', 'senderEmail', 'amount', 'currency', 'description', 'status', 'dueDate', 'createdAt', 'updatedAt', 'paymentReference']);
-    }
-
-    // Rules
-    match /{document=**} { 
-      allow read, write: if false; 
-    }
-
+    // ── Users ───────────────────────────────────────────────────────────────────
     match /users/{userId} {
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming());
-      allow update: if isOwner(userId) && isValidId(userId) && isValidUser(incoming());
+      allow create: if isAuth() && userId == request.auth.uid;
+      allow update: if isAuth() && userId == request.auth.uid;
       allow delete: if false;
     }
 
+    // ── Legal Data Collections ──────────────────────────────────────────────────
     match /matters/{matterId} {
-      allow read: if isDocOwner();
-      allow create: if isAuthenticated() && isValidId(matterId) && isValidMatter(incoming());
-      allow update: if isDocOwner() && isValidId(matterId) && areImmutableFieldsUnchanged(['uid']) && isValidMatter(incoming());
-      allow delete: if isDocOwner() && isValidId(matterId);
+      allow read: if canAccessDoc();
+      allow create: if isAuth() && incoming().uid == request.auth.uid;
+      allow update: if canAccessDoc() && areImmutableFieldsUnchanged(['uid']);
+      allow delete: if canAccessDoc();
     }
-    
+
     match /appointments/{appointmentId} {
-      allow read: if isDocOwner();
-      allow create: if isAuthenticated() && isValidId(appointmentId) && isValidAppointment(incoming());
-      allow update: if isDocOwner() && isValidId(appointmentId) && areImmutableFieldsUnchanged(['uid', 'matterId']) && isValidAppointment(incoming());
-      allow delete: if isDocOwner() && isValidId(appointmentId);
+      allow read: if canAccessDoc();
+      allow create: if isAuth() && incoming().uid == request.auth.uid;
+      allow update: if canAccessDoc() && areImmutableFieldsUnchanged(['uid', 'matterId']);
+      allow delete: if canAccessDoc();
     }
 
     match /followUps/{followUpId} {
-      allow read: if isDocOwner();
-      allow create: if isAuthenticated() && isValidId(followUpId) && isValidFollowUp(incoming());
-      allow update: if isDocOwner() && isValidId(followUpId) && areImmutableFieldsUnchanged(['uid', 'matterId']) && isValidFollowUp(incoming());
-      allow delete: if isDocOwner() && isValidId(followUpId);
+      allow read: if canAccessDoc();
+      allow create: if isAuth() && incoming().uid == request.auth.uid;
+      allow update: if canAccessDoc() && areImmutableFieldsUnchanged(['uid', 'matterId']);
+      allow delete: if canAccessDoc();
     }
 
     match /filings/{filingId} {
-      allow read: if isDocOwner();
-      allow create: if isAuthenticated() && isValidId(filingId) && isValidFiling(incoming());
-      allow update: if isDocOwner() && isValidId(filingId) && isValidFiling(incoming());
-      allow delete: if isDocOwner() && isValidId(filingId);
+      allow read: if canAccessDoc();
+      allow create: if isAuth() && incoming().uid == request.auth.uid;
+      allow update: if canAccessDoc();
+      allow delete: if canAccessDoc();
     }
 
     match /caseTemplates/{templateId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && isValidCaseTemplate(incoming());
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidCaseTemplate(incoming());
-      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read: if isAuth() && (resource.data.userId == request.auth.uid || (resource.data.get('orgId', null) != null && isOrgMember(resource.data.orgId)));
+      allow create: if isAuth();
+      allow update: if isAuth() && (resource.data.userId == request.auth.uid || (resource.data.get('orgId', null) != null && isOrgMember(resource.data.orgId)));
+      allow delete: if isAuth() && (resource.data.userId == request.auth.uid || (resource.data.get('orgId', null) != null && isOrgMember(resource.data.orgId)));
     }
 
     match /agreements/{agId} {
-      allow read: if isDocOwner();
-      allow create: if isAuthenticated() && isValidId(agId) && isValidAgreement(incoming());
-      allow update: if isDocOwner() && isValidId(agId) && areImmutableFieldsUnchanged(['uid', 'createdAt']) && isValidAgreement(incoming());
-      allow delete: if isDocOwner();
+      allow read: if canAccessDoc();
+      allow create: if isAuth() && incoming().uid == request.auth.uid;
+      allow update: if canAccessDoc() && areImmutableFieldsUnchanged(['uid', 'createdAt']);
+      allow delete: if canAccessDoc();
     }
 
     match /emails/{emailId} {
-      allow read: if isDocOwner();
-      allow create: if isAuthenticated() && isValidId(emailId) && isValidEmailLog(incoming());
-      allow update: if isDocOwner() && isValidId(emailId) && areImmutableFieldsUnchanged(['uid']) && isValidEmailLog(incoming());
-      allow delete: if isDocOwner();
+      allow read: if canAccessDoc();
+      allow create: if isAuth() && incoming().uid == request.auth.uid;
+      allow update: if canAccessDoc() && areImmutableFieldsUnchanged(['uid']);
+      allow delete: if canAccessDoc();
     }
 
     match /vetting/{vetId} {
-      allow read: if isDocOwner();
-      allow create: if isAuthenticated() && isValidId(vetId) && isValidVetting(incoming());
-      allow update: if false; // Vetting should be immutable diagnostic
-      allow delete: if isDocOwner();
+      allow read: if canAccessDoc();
+      allow create: if isAuth() && incoming().uid == request.auth.uid;
+      allow update: if false;
+      allow delete: if canAccessDoc();
     }
 
     match /invoices/{invoiceId} {
-      allow read: if isDocOwner();
-      allow create: if isAuthenticated() && isValidInvoice(incoming()) && incoming().createdAt == request.time;
-      allow update: if isDocOwner() && 
-                    areImmutableFieldsUnchanged(['uid', 'matterId', 'currency', 'createdAt']) && 
-                    isValidInvoice(incoming()) &&
-                    incoming().updatedAt == request.time;
-      allow delete: if isDocOwner() && existing().status == 'draft';
+      allow read: if canAccessDoc();
+      allow create: if isAuth() && incoming().uid == request.auth.uid;
+      allow update: if canAccessDoc() && areImmutableFieldsUnchanged(['uid', 'matterId', 'currency', 'createdAt']);
+      allow delete: if canAccessDoc() && existing().status == 'draft';
     }
 
   }

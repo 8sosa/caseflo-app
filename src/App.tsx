@@ -1,11 +1,11 @@
 import React, { useState, useEffect, Component, ReactNode } from 'react';
-import { 
-  LayoutDashboard, 
-  Briefcase, 
-  FileText, 
-  Truck, 
-  Settings, 
-  Plus, 
+import {
+  LayoutDashboard,
+  Briefcase,
+  FileText,
+  Truck,
+  Settings,
+  Plus,
   Search,
   ExternalLink,
   Calendar,
@@ -38,31 +38,43 @@ import {
   FileBadge,
   Trash2,
   Menu,
-  X
+  X,
+  Building2,
+  Crown,
+  Shield,
+  ChevronRight,
+  Check,
+  Users2,
+  Star,
+  Zap,
+  ArrowRight,
+  Key
 } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import { 
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  onAuthStateChanged, 
+  onAuthStateChanged,
   signOut,
   User as FirebaseUser,
   updateProfile,
   GoogleAuthProvider,
-  signInWithPopup
+  signInWithPopup,
+  sendEmailVerification
 } from 'firebase/auth';
 import axios from 'axios';
 import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  addDoc, 
+  collection,
+  query,
+  where,
+  onSnapshot,
+  addDoc,
   updateDoc,
   serverTimestamp,
   doc,
   setDoc,
   getDoc,
+  getDocs,
   deleteDoc,
   orderBy,
   limit
@@ -162,6 +174,7 @@ interface EFiling {
 
 interface UserProfile {
   uid: string;
+  orgId?: string;
   role: 'Admin' | 'Lawyer' | 'Staff';
   email: string;
   name: string;
@@ -211,6 +224,60 @@ interface CaseVetting {
   createdAt: any;
 }
 
+// --- Multi-Tenant Types ---
+
+type SubscriptionStatus = 'trial' | 'active' | 'expired' | 'cancelled';
+
+interface Organization {
+  id: string;
+  name: string;
+  domain: string;
+  adminUid: string;
+  plan: 'trial' | 'starter' | 'professional' | 'enterprise';
+  maxUsers: number;
+  currentUserCount: number;
+  subscriptionStatus: SubscriptionStatus;
+  trialEndsAt?: any;
+  subscriptionExpiresAt?: any;
+  paystackCustomerCode?: string;
+  paystackSecretKey?: string;
+  paystackPublicKey?: string;
+  createdAt: any;
+}
+
+interface OrgMember {
+  uid: string;
+  email: string;
+  name: string;
+  role: 'Admin' | 'Lawyer' | 'Staff';
+  joinedAt: any;
+}
+
+const SUBSCRIPTION_PLANS = [
+  {
+    id: 'starter' as const,
+    name: 'Starter',
+    price: 15000,
+    maxUsers: 5,
+    features: ['Up to 5 team members', 'Unlimited matters', 'E-filing access', 'AI case vetting', 'Email support'],
+  },
+  {
+    id: 'professional' as const,
+    name: 'Professional',
+    price: 35000,
+    maxUsers: 15,
+    popular: true,
+    features: ['Up to 15 team members', 'Unlimited matters', 'Priority e-filing', 'Advanced AI vetting', 'Priority support', 'Custom Paystack integration'],
+  },
+  {
+    id: 'enterprise' as const,
+    name: 'Enterprise',
+    price: 75000,
+    maxUsers: 999,
+    features: ['Unlimited team members', 'Unlimited matters', 'Full e-filing suite', 'Advanced AI + vetting', '24/7 support', 'Custom branding', 'Dedicated account manager'],
+  },
+];
+
 // --- Components ---
 
 class ErrorBoundary extends React.Component<any, any> {
@@ -254,34 +321,134 @@ class ErrorBoundary extends React.Component<any, any> {
   }
 }
 
-const Login = () => {
-  const [isSignUp, setIsSignUp] = useState(false);
+const WorkspaceSignIn = () => {
+  const [mode, setMode] = useState<'signin' | 'register'>('signin');
+  // 'existing' = has account, 'join' = new user joining existing workspace
+  const [signinMode, setSigninMode] = useState<'existing' | 'join'>('existing');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [firmName, setFirmName] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const getDomain = (e: string) => e.split('@')[1]?.toLowerCase() || '';
+
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      if (isSignUp) {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        await updateProfile(userCredential.user, { displayName: name });
-        toast.success('Account created successfully');
-      } else {
-        await signInWithEmailAndPassword(auth, email, password);
-        toast.success('Logged in successfully');
-      }
+      await signInWithEmailAndPassword(auth, email, password);
     } catch (error: any) {
-      console.error('Auth Error:', error);
-      let msg = error.message || 'Authentication failed';
-      if (error.code === 'auth/operation-not-allowed') {
-        msg = 'Email/Password login is not enabled in Firebase Console. Please enable it or use Guest Access.';
-      } else if (error.code === 'auth/network-request-failed') {
-        msg = 'Network error. Please check your connection or try Guest Access.';
+      const code = error.code || '';
+      if (code === 'auth/user-not-found' || code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
+        toast.error('No account found — are you a new team member? Switch to "Join workspace" below.');
+      } else if (code === 'auth/too-many-requests') {
+        toast.error('Too many attempts. Try again in a few minutes.');
+      } else {
+        toast.error(error.message || 'Sign in failed');
       }
-      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Creates a Firebase account ONLY — no org created.
+  // fetchProfileAndOrg will auto-detect the domain and join the existing org.
+  const handleJoinWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) { toast.error('Please enter your full name'); return; }
+    setLoading(true);
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      await updateProfile(cred.user, { displayName: name });
+      // Create a minimal user profile — fetchProfileAndOrg will auto-join the org
+      await setDoc(doc(db, 'users', cred.user.uid), {
+        uid: cred.user.uid,
+        role: 'Lawyer',
+        email: cred.user.email || '',
+        name: name.trim(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      toast.success('Account created! Joining your workspace...');
+    } catch (error: any) {
+      if (error.code === 'auth/email-already-in-use') {
+        toast.error('An account with this email already exists. Sign in instead.');
+        setSigninMode('existing');
+      } else {
+        toast.error(error.message || 'Failed to create account');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!firmName.trim() || !name.trim() || !email || !password) {
+      toast.error('Please fill in all fields');
+      return;
+    }
+    setLoading(true);
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      await updateProfile(cred.user, { displayName: name });
+      // Send verification email but don't block workspace creation
+      sendEmailVerification(cred.user).catch(() => {});
+
+      const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+      const domain = getDomain(email);
+
+      const orgRef = await addDoc(collection(db, 'organizations'), {
+        name: firmName.trim(),
+        domain,
+        adminUid: cred.user.uid,
+        plan: 'trial',
+        maxUsers: 5,
+        currentUserCount: 1,
+        subscriptionStatus: 'trial',
+        trialEndsAt,
+        createdAt: serverTimestamp(),
+      });
+
+      await setDoc(doc(db, 'organizations', orgRef.id, 'members', cred.user.uid), {
+        uid: cred.user.uid,
+        email: cred.user.email,
+        name: cred.user.displayName,
+        role: 'Admin',
+        joinedAt: serverTimestamp(),
+      });
+
+      await setDoc(doc(db, 'users', cred.user.uid), {
+        uid: cred.user.uid,
+        orgId: orgRef.id,
+        role: 'Admin',
+        email: cred.user.email || '',
+        name: cred.user.displayName || name,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      toast.success(`Workspace "${firmName.trim()}" created!`);
+    } catch (error: any) {
+      if (error.code === 'auth/email-already-in-use') {
+        toast.error('An account with this email already exists. Sign in instead.');
+        setMode('signin');
+      } else {
+        toast.error(error.message || 'Failed to create workspace');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (error: any) {
+      toast.error(error.message || 'Google sign in failed');
     } finally {
       setLoading(false);
     }
@@ -292,19 +459,199 @@ const Login = () => {
     window.location.reload();
   };
 
-  const handleGoogleSignIn = async () => {
+  const GoogleIcon = () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M22.56 12.25C22.56 11.47 22.49 10.71 22.36 10H12V14.25H17.92C17.67 15.63 16.89 16.8 15.7 17.59V20.34H19.26C21.34 18.42 22.56 15.59 22.56 12.25Z" fill="#4285F4"/>
+      <path d="M12 23C14.97 23 17.46 22.02 19.26 20.34L15.7 17.59C14.73 18.24 13.48 18.66 12 18.66C9.13 18.66 6.7 16.71 5.84 14.12H2.18V16.96C3.99 20.55 7.69 23 12 23Z" fill="#34A853"/>
+      <path d="M5.84 14.12C5.62 13.47 5.5 12.75 5.5 12C5.5 11.25 5.62 10.53 5.84 9.88V7.04H2.18C1.43 8.53 1 10.21 1 12C1 13.79 1.43 15.47 2.18 16.96L5.84 14.12Z" fill="#FBBC05"/>
+      <path d="M12 5.34C13.62 5.34 15.07 5.89 16.21 6.98L19.34 3.85C17.45 2.09 14.97 1 12 1C7.69 1 3.99 3.45 2.18 7.04L5.84 9.88C6.7 7.29 9.13 5.34 12 5.34Z" fill="#EA4335"/>
+    </svg>
+  );
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-bg p-4">
+      <Card className="w-full max-w-md border-border-theme shadow-sm rounded-[20px]">
+        <CardHeader className="text-center space-y-2 pb-4">
+          <div className="mx-auto w-12 h-12 bg-accent rounded-xl flex items-center justify-center mb-2 shadow-lg shadow-accent/20">
+            <Briefcase className="text-white w-6 h-6" />
+          </div>
+          <CardTitle className="text-2xl font-extrabold tracking-tight text-primary">Caseflo</CardTitle>
+          <CardDescription className="text-text-muted">Legal workflow automation for Nigerian firms</CardDescription>
+        </CardHeader>
+
+        <CardContent className="space-y-4">
+          {/* Mode toggle */}
+          <div className="flex bg-bg rounded-xl p-1 gap-1">
+            <button
+              type="button"
+              onClick={() => setMode('signin')}
+              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${mode === 'signin' ? 'bg-white text-primary shadow-sm' : 'text-text-muted hover:text-primary'}`}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('register')}
+              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${mode === 'register' ? 'bg-white text-primary shadow-sm' : 'text-text-muted hover:text-primary'}`}
+            >
+              Create Workspace
+            </button>
+          </div>
+
+          {/* Sign In form */}
+          {mode === 'signin' && signinMode === 'existing' && (
+            <form onSubmit={handleSignIn} className="space-y-4">
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Email</Label>
+                <Input type="email" className="rounded-xl border-border-theme h-12" placeholder="counsel@yourfirm.ng" value={email} onChange={e => setEmail(e.target.value)} required autoFocus />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Password</Label>
+                <Input type="password" className="rounded-xl border-border-theme h-12" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required />
+              </div>
+              <Button type="submit" disabled={loading} className="w-full bg-accent hover:bg-accent/90 text-white h-12 rounded-xl font-bold">
+                {loading ? <RefreshCw className="animate-spin" size={18} /> : 'Sign In'}
+              </Button>
+              <button type="button" onClick={() => { setSigninMode('join'); setPassword(''); }} className="w-full text-xs text-text-muted hover:text-accent font-medium text-center pt-1">
+                New team member joining an existing workspace? →
+              </button>
+            </form>
+          )}
+
+          {/* Join existing workspace (new account, no new org) */}
+          {mode === 'signin' && signinMode === 'join' && (
+            <form onSubmit={handleJoinWorkspace} className="space-y-4">
+              <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-xl">
+                <Users2 size={14} className="text-green-600 shrink-0" />
+                <p className="text-xs font-bold text-green-800">
+                  Sign up with your work email — you'll auto-join your firm's workspace.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Full Name</Label>
+                <Input className="rounded-xl border-border-theme h-12" placeholder="Your full name" value={name} onChange={e => setName(e.target.value)} required autoFocus />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Work Email</Label>
+                <Input type="email" className="rounded-xl border-border-theme h-12" placeholder="you@yourfirm.ng" value={email} onChange={e => setEmail(e.target.value)} required />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Password</Label>
+                <Input type="password" className="rounded-xl border-border-theme h-12" placeholder="Min 6 characters" value={password} onChange={e => setPassword(e.target.value)} required />
+              </div>
+              <Button type="submit" disabled={loading} className="w-full bg-accent hover:bg-accent/90 text-white h-12 rounded-xl font-bold">
+                {loading ? <RefreshCw className="animate-spin" size={18} /> : 'Create Account & Join Workspace'}
+              </Button>
+              <button type="button" onClick={() => setSigninMode('existing')} className="w-full text-xs text-text-muted hover:text-accent font-medium text-center pt-1">
+                ← Already have an account? Sign in
+              </button>
+            </form>
+          )}
+
+          {/* Create Workspace form */}
+          {mode === 'register' && (
+            <form onSubmit={handleCreateWorkspace} className="space-y-4">
+              <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl">
+                <Zap size={14} className="text-blue-600 shrink-0" />
+                <p className="text-xs font-bold text-blue-800">Free 14-day trial — no credit card required.</p>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Firm Name</Label>
+                <Input className="rounded-xl border-border-theme h-12" placeholder="e.g. Lex & Partners LP" value={firmName} onChange={e => setFirmName(e.target.value)} required autoFocus />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Your Full Name</Label>
+                <Input className="rounded-xl border-border-theme h-12" placeholder="Principal Partner" value={name} onChange={e => setName(e.target.value)} required />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Work Email</Label>
+                <Input type="email" className="rounded-xl border-border-theme h-12" placeholder="counsel@yourfirm.ng" value={email} onChange={e => setEmail(e.target.value)} required />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Password</Label>
+                <Input type="password" className="rounded-xl border-border-theme h-12" placeholder="Min 6 characters" value={password} onChange={e => setPassword(e.target.value)} required />
+              </div>
+              <Button type="submit" disabled={loading} className="w-full bg-accent hover:bg-accent/90 text-white h-12 rounded-xl font-bold">
+                {loading ? <RefreshCw className="animate-spin" size={18} /> : 'Create Workspace'}
+              </Button>
+            </form>
+          )}
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-border-theme" /></div>
+            <div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-text-muted">Or</span></div>
+          </div>
+          <Button variant="outline" onClick={handleGoogleSignIn} disabled={loading} className="w-full rounded-xl border-border-theme h-12 text-sm font-bold flex items-center justify-center gap-2">
+            <GoogleIcon /> Continue with Google
+          </Button>
+          <Button variant="outline" onClick={handleGuestAccess} className="w-full rounded-xl border-border-theme h-12 text-sm font-bold text-text-muted hover:text-accent">
+            Continue as Guest (Demo Mode)
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+// Shown when a user is authenticated but not linked to any org (e.g. Google sign-in, or legacy accounts)
+const OrgSetup = ({ user, onDone }: { user: FirebaseUser; onDone: (org: Organization) => void }) => {
+  const [firmName, setFirmName] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!firmName.trim()) return;
     setLoading(true);
     try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-      toast.success('Logged in with Google successfully');
-    } catch (error: any) {
-      console.error('Google Auth Error:', error);
-      let msg = error.message || 'Google Authentication failed';
-      if (error.code === 'auth/operation-not-allowed') {
-        msg = 'Google login is not enabled in Firebase Console. Please go to Authentication -> Sign-in method and enable Google.';
-      }
-      toast.error(msg, { duration: 5000 });
+      const domain = user.email?.split('@')[1]?.toLowerCase() || 'workspace.local';
+      const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+
+      const orgRef = await addDoc(collection(db, 'organizations'), {
+        name: firmName.trim(),
+        domain,
+        adminUid: user.uid,
+        plan: 'trial',
+        maxUsers: 5,
+        currentUserCount: 1,
+        subscriptionStatus: 'trial',
+        trialEndsAt,
+        createdAt: serverTimestamp(),
+      });
+
+      await setDoc(doc(db, 'organizations', orgRef.id, 'members', user.uid), {
+        uid: user.uid,
+        email: user.email,
+        name: user.displayName,
+        role: 'Admin',
+        joinedAt: serverTimestamp(),
+      });
+
+      await setDoc(doc(db, 'users', user.uid), {
+        uid: user.uid,
+        orgId: orgRef.id,
+        role: 'Admin',
+        email: user.email || '',
+        name: user.displayName || 'Admin',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      const org: Organization = {
+        id: orgRef.id,
+        name: firmName.trim(),
+        domain,
+        adminUid: user.uid,
+        plan: 'trial',
+        maxUsers: 5,
+        currentUserCount: 1,
+        subscriptionStatus: 'trial',
+        trialEndsAt,
+        createdAt: null,
+      };
+      onDone(org);
+      toast.success('Workspace created!');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create workspace');
     } finally {
       setLoading(false);
     }
@@ -312,74 +659,229 @@ const Login = () => {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-bg p-4">
-      <Card className="w-full max-w-md border-border-theme shadow-sm rounded-[16px]">
+      <Card className="w-full max-w-sm border-border-theme shadow-sm rounded-[20px]">
         <CardHeader className="text-center space-y-2">
           <div className="mx-auto w-12 h-12 bg-accent rounded-xl flex items-center justify-center mb-2 shadow-lg shadow-accent/20">
-            <Briefcase className="text-white w-6 h-6"/>
+            <Building2 className="text-white w-6 h-6" />
           </div>
-          <CardTitle className="text-2xl font-extrabold tracking-tight text-primary">Caseflo</CardTitle>
-          <CardDescription className="text-text-muted">Legal workflow automation platform</CardDescription>
+          <CardTitle className="text-xl font-extrabold text-primary">Set up your workspace</CardTitle>
+          <CardDescription>Signed in as {user.email}. Create your firm workspace to continue.</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {isSignUp && (
-              <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Full Name</Label>
-                <Input className="rounded-xl border-border-theme h-12" placeholder="John Doe" value={name} onChange={(e) => setName(e.target.value)}
-                  required
-                />
-              </div>
-            )}
+          <form onSubmit={handleCreate} className="space-y-4">
             <div className="space-y-2">
-              <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Email Address</Label>
-              <Input type="email" className="rounded-xl border-border-theme h-12" placeholder="counsel@firm.ng" value={email} onChange={(e) => setEmail(e.target.value)}
-                required
-              />
+              <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Firm Name</Label>
+              <Input className="rounded-xl border-border-theme h-12" placeholder="e.g. Lex & Partners LP" value={firmName} onChange={e => setFirmName(e.target.value)} required autoFocus />
             </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Password</Label>
-              <Input type="password" className="rounded-xl border-border-theme h-12" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
-            <button type="submit" disabled={loading} className="w-full bg-accent hover:bg-accent/90 text-white py-6 text-lg rounded-xl transition-all">
-              {loading ? <RefreshCw className="animate-spin"/> : (isSignUp ? 'Create Account' : 'Sign In')}
-            </button>
+            <Button type="submit" disabled={loading || !firmName.trim()} className="w-full bg-accent hover:bg-accent/90 text-white h-12 rounded-xl font-bold">
+              {loading ? <RefreshCw className="animate-spin" size={18} /> : 'Create Workspace'}
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => signOut(auth)} className="w-full text-sm text-text-muted">
+              Sign out
+            </Button>
           </form>
-          
-          <div className="mt-6 flex flex-col gap-3 text-center">
-            <button onClick={() => setIsSignUp(!isSignUp)}
-              className="text-sm font-bold text-accent hover:underline"
-            >
-              {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
-            </button>
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t border-border-theme"/>
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-white px-2 text-text-muted">Or</span>
-              </div>
-            </div>
-          <Button variant="outline" onClick={handleGoogleSignIn} disabled={loading} className="rounded-xl border-border-theme h-12 text-sm font-bold text-primary hover:bg-slate-50 flex items-center justify-center gap-2">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M22.56 12.25C22.56 11.47 22.49 10.71 22.36 10H12V14.25H17.92C17.67 15.63 16.89 16.8 15.7 17.59V20.34H19.26C21.34 18.42 22.56 15.59 22.56 12.25Z" fill="#4285F4"/>
-                <path d="M12 23C14.97 23 17.46 22.02 19.26 20.34L15.7 17.59C14.73 18.24 13.48 18.66 12 18.66C9.13 18.66 6.7 16.71 5.84 14.12H2.18V16.96C3.99 20.55 7.69 23 12 23Z" fill="#34A853"/>
-                <path d="M5.84 14.12C5.62 13.47 5.5 12.75 5.5 12C5.5 11.25 5.62 10.53 5.84 9.88V7.04H2.18C1.43 8.53 1 10.21 1 12C1 13.79 1.43 15.47 2.18 16.96L5.84 14.12Z" fill="#FBBC05"/>
-                <path d="M12 5.34C13.62 5.34 15.07 5.89 16.21 6.98L19.34 3.85C17.45 2.09 14.97 1 12 1C7.69 1 3.99 3.45 2.18 7.04L5.84 9.88C6.7 7.29 9.13 5.34 12 5.34Z" fill="#EA4335"/>
-              </svg>
-              Continue with Google
-            </Button>
-            <Button variant="outline" onClick={handleGuestAccess} className="rounded-xl border-border-theme h-12 text-sm font-bold text-text-muted hover:text-accent">
-              Continue as Guest (Test Mode)
-            </Button>
-          </div>
-
-          <p className="mt-4 text-center text-[10px] text-text-muted uppercase tracking-widest">
-            Secure Legal Access
-          </p>
         </CardContent>
       </Card>
+    </div>
+  );
+};
+
+const EmailVerificationPending = ({ user }: { user: FirebaseUser }) => {
+  const [sending, setSending] = useState(false);
+
+  const resend = async () => {
+    setSending(true);
+    try {
+      await sendEmailVerification(user);
+      toast.success('Verification email sent!');
+    } catch {
+      toast.error('Failed to resend. Try again in a minute.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-bg p-4">
+      <div className="w-full max-w-md text-center space-y-6">
+        <div className="mx-auto w-20 h-20 bg-amber-100 rounded-full flex items-center justify-center">
+          <Mail size={36} className="text-amber-600" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-extrabold text-primary mb-2">Check your email</h1>
+          <p className="text-text-muted text-sm leading-relaxed">
+            We sent a verification link to <span className="font-bold text-primary">{user.email}</span>. Click the link to activate your account and access your workspace.
+          </p>
+        </div>
+        <div className="space-y-3">
+          <Button
+            onClick={async () => {
+              try { await user.reload(); } catch { /* ignore */ }
+              window.location.reload();
+            }}
+            className="w-full bg-accent hover:bg-accent/90 text-white h-12 rounded-xl font-bold"
+          >
+            I've verified — Continue
+          </Button>
+          <Button variant="outline" onClick={resend} disabled={sending} className="w-full rounded-xl border-border-theme h-12 font-bold text-text-muted">
+            {sending ? <RefreshCw className="animate-spin" size={16} /> : 'Resend verification email'}
+          </Button>
+          <Button variant="ghost" onClick={() => signOut(auth)} className="w-full text-sm text-text-muted">
+            Sign out and use a different account
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const SubscriptionPage = ({
+  organization,
+  user,
+  onSubscribed,
+}: {
+  organization: Organization;
+  user: FirebaseUser;
+  onSubscribed: (plan: string, expiresAt: string, maxUsers: number) => void;
+}) => {
+  const [loading, setLoading] = useState<string | null>(null);
+
+  const daysLeft = organization.trialEndsAt
+    ? Math.max(0, Math.ceil((organization.trialEndsAt.toDate?.() ?? new Date(organization.trialEndsAt) as Date).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    : 0;
+
+  const handleSubscribe = async (plan: typeof SUBSCRIPTION_PLANS[number]) => {
+    setLoading(plan.id);
+    try {
+      const res = await axios.post('/api/subscriptions/initialize', {
+        email: user.email,
+        plan: plan.id,
+        orgId: organization.id,
+        orgName: organization.name,
+      });
+
+      if (res.data?.data?.authorization_url) {
+        const authUrl: string = res.data.data.authorization_url;
+        const ref: string = res.data.data.reference;
+
+        // Open Paystack checkout
+        const popup = window.open(authUrl, '_blank', 'width=600,height=700');
+
+        // Poll for payment completion via reference in URL params or popup close
+        const poll = setInterval(async () => {
+          try {
+            const verify = await axios.post('/api/subscriptions/verify', { reference: ref });
+            if (verify.data?.verified) {
+              clearInterval(poll);
+              popup?.close();
+              onSubscribed(verify.data.plan, verify.data.subscriptionExpiresAt, verify.data.maxUsers);
+            }
+          } catch { /* still waiting */ }
+        }, 3000);
+
+        // Stop polling after 15 minutes
+        setTimeout(() => clearInterval(poll), 15 * 60 * 1000);
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to start payment');
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const isTrial = organization.subscriptionStatus === 'trial';
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-bg p-4">
+      <div className="w-full max-w-4xl space-y-8">
+        <div className="text-center space-y-3">
+          <div className="mx-auto w-16 h-16 bg-accent/10 rounded-full flex items-center justify-center">
+            <Crown size={32} className="text-accent" />
+          </div>
+          <h1 className="text-3xl font-extrabold text-primary">
+            {isTrial ? (daysLeft > 0 ? 'Your Free Trial' : 'Trial Ended') : 'Subscription Required'}
+          </h1>
+          {isTrial && daysLeft > 0 ? (
+            <p className="text-text-muted max-w-lg mx-auto">
+              You have <span className="font-black text-amber-600">{Math.floor(daysLeft)} days</span> left in your free trial.
+              Subscribe to keep your workspace running after the trial ends.
+            </p>
+          ) : (
+            <p className="text-text-muted max-w-lg mx-auto">
+              Subscribe to Caseflo to access your workspace and all legal workflow features.
+            </p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {SUBSCRIPTION_PLANS.map(plan => (
+            <div key={plan.id} className={`relative bg-white rounded-2xl border-2 p-6 flex flex-col transition-all ${plan.popular ? 'border-accent shadow-xl shadow-accent/10' : 'border-border-theme'}`}>
+              {plan.popular && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                  <span className="bg-accent text-white text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full">Most Popular</span>
+                </div>
+              )}
+              <div className="mb-4">
+                <h3 className="text-lg font-extrabold text-primary">{plan.name}</h3>
+                <div className="mt-2">
+                  <span className="text-3xl font-black text-primary">₦{plan.price.toLocaleString()}</span>
+                  <span className="text-text-muted text-sm font-medium">/month</span>
+                </div>
+                <p className="text-xs text-text-muted mt-1">
+                  {plan.maxUsers < 999 ? `Up to ${plan.maxUsers} users` : 'Unlimited users'}
+                </p>
+              </div>
+              <ul className="space-y-2 flex-1 mb-6">
+                {plan.features.map(f => (
+                  <li key={f} className="flex items-start gap-2 text-sm text-text-muted">
+                    <Check size={14} className="text-green-500 mt-0.5 shrink-0" />
+                    {f}
+                  </li>
+                ))}
+              </ul>
+              <Button
+                onClick={() => handleSubscribe(plan)}
+                disabled={loading !== null}
+                className={`w-full h-11 rounded-xl font-bold ${plan.popular ? 'bg-accent hover:bg-accent/90 text-white' : 'bg-primary hover:bg-primary/90 text-white'}`}
+              >
+                {loading === plan.id ? <RefreshCw className="animate-spin" size={16} /> : `Subscribe — ₦${plan.price.toLocaleString()}/mo`}
+              </Button>
+            </div>
+          ))}
+        </div>
+
+        {isTrial && daysLeft > 0 && (
+          <div className="text-center">
+            <Button variant="ghost" onClick={() => onSubscribed('trial', organization.trialEndsAt?.toDate?.()?.toISOString() ?? '', organization.maxUsers)} className="text-text-muted text-sm">
+              Continue with trial ({Math.floor(daysLeft)} days left) →
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const SubscriptionBanner = ({ organization, onUpgrade }: { organization: Organization; onUpgrade: () => void }) => {
+  if (organization.subscriptionStatus !== 'trial') return null;
+
+  const daysLeft = organization.trialEndsAt
+    ? Math.max(0, Math.ceil((organization.trialEndsAt.toDate?.() ?? new Date(organization.trialEndsAt) as Date).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    : 0;
+
+  if (daysLeft <= 0) return null;
+
+  return (
+    <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-6">
+      <div className="flex items-center gap-2">
+        <Star size={14} className="text-amber-600 shrink-0" />
+        <p className="text-xs font-bold text-amber-800">
+          Free trial — <span className="font-black">{Math.floor(daysLeft)} days</span> remaining. Subscribe to keep your workspace active.
+        </p>
+      </div>
+      <Button size="sm" onClick={onUpgrade} className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg shrink-0">
+        Upgrade
+      </Button>
     </div>
   );
 };
@@ -2094,8 +2596,168 @@ const OnboardingPage = ({ agreements, matters }: { agreements: EngagementAgreeme
     </div>
   );
 };
-const SettingsPage = () => {
+const SubscriptionManagementPage = ({
+  organization,
+  orgMembers,
+  user,
+  onUpgrade,
+  onOrgUpdated,
+}: {
+  organization: Organization;
+  orgMembers: OrgMember[];
+  user: FirebaseUser;
+  onUpgrade: () => void;
+  onOrgUpdated: (org: Organization) => void;
+}) => {
+  const planInfo = SUBSCRIPTION_PLANS.find(p => p.id === organization.plan);
+  const subExpiry = organization.subscriptionExpiresAt
+    ? (organization.subscriptionExpiresAt.toDate ? organization.subscriptionExpiresAt.toDate() : new Date(organization.subscriptionExpiresAt))
+    : null;
+  const trialEnd = organization.trialEndsAt
+    ? (organization.trialEndsAt.toDate ? organization.trialEndsAt.toDate() : new Date(organization.trialEndsAt))
+    : null;
+  const daysLeft = trialEnd ? Math.max(0, Math.ceil((trialEnd.getTime() - Date.now()) / (1000 * 60 * 60 * 24))) : 0;
+
+  const statusColor = {
+    trial: 'bg-amber-100 text-amber-800 border-amber-200',
+    active: 'bg-green-100 text-green-800 border-green-200',
+    expired: 'bg-red-100 text-red-800 border-red-200',
+    cancelled: 'bg-gray-100 text-gray-800 border-gray-200',
+  }[organization.subscriptionStatus] || 'bg-gray-100 text-gray-800';
+
+  return (
+    <div className="space-y-6">
+      {/* Plan Overview */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="bento-card bg-white p-5">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1">Current Plan</p>
+          <p className="text-2xl font-black text-primary capitalize">{organization.plan}</p>
+          <Badge className={`mt-2 text-[10px] font-bold border capitalize ${statusColor}`}>
+            {organization.subscriptionStatus === 'trial' ? `Trial — ${daysLeft}d left` : organization.subscriptionStatus}
+          </Badge>
+        </div>
+        <div className="bento-card bg-white p-5">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1">Team Seats</p>
+          <p className="text-2xl font-black text-primary">{organization.currentUserCount} <span className="text-lg text-text-muted font-medium">/ {organization.maxUsers < 999 ? organization.maxUsers : '∞'}</span></p>
+          <p className="text-xs text-text-muted mt-1">Active members</p>
+        </div>
+        <div className="bento-card bg-white p-5">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1">
+            {organization.subscriptionStatus === 'active' ? 'Next Billing' : 'Trial Ends'}
+          </p>
+          <p className="text-lg font-black text-primary">
+            {subExpiry ? format(subExpiry, 'MMM d, yyyy') : trialEnd ? format(trialEnd, 'MMM d, yyyy') : '—'}
+          </p>
+          <p className="text-xs text-text-muted mt-1">{planInfo ? `₦${planInfo.price.toLocaleString()}/month` : 'Free trial'}</p>
+        </div>
+      </div>
+
+      {/* Plan Features */}
+      <div className="bento-card bg-white p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-lg font-bold text-primary">Plan Features</h3>
+          <Button onClick={onUpgrade} className="bg-accent hover:bg-accent/90 text-white rounded-xl font-bold text-sm h-9">
+            <Crown size={14} className="mr-1.5" /> Upgrade Plan
+          </Button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {SUBSCRIPTION_PLANS.map(plan => (
+            <div key={plan.id} className={`p-4 rounded-xl border-2 transition-all ${plan.id === organization.plan ? 'border-accent bg-accent/5' : 'border-border-theme'}`}>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-bold text-primary text-sm">{plan.name}</h4>
+                {plan.id === organization.plan && <Badge className="bg-accent text-white border-none text-[9px]">Current</Badge>}
+              </div>
+              <p className="text-xl font-black text-primary">₦{plan.price.toLocaleString()}<span className="text-xs font-medium text-text-muted">/mo</span></p>
+              <p className="text-xs text-text-muted mt-1 mb-3">{plan.maxUsers < 999 ? `${plan.maxUsers} users` : 'Unlimited users'}</p>
+              <ul className="space-y-1">
+                {plan.features.slice(0, 3).map(f => (
+                  <li key={f} className="text-xs text-text-muted flex items-center gap-1.5">
+                    <Check size={11} className="text-green-500 shrink-0" /> {f}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Workspace Info */}
+      <div className="bento-card bg-white p-6">
+        <h3 className="text-lg font-bold text-primary mb-4">Workspace Details</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between p-3 bg-bg rounded-xl border border-border-theme">
+              <span className="text-text-muted font-medium">Firm Name</span>
+              <span className="font-bold text-primary">{organization.name}</span>
+            </div>
+            <div className="flex items-center justify-between p-3 bg-bg rounded-xl border border-border-theme">
+              <span className="text-text-muted font-medium">Domain</span>
+              <span className="font-bold text-primary">@{organization.domain}</span>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between p-3 bg-bg rounded-xl border border-border-theme">
+              <span className="text-text-muted font-medium">Workspace ID</span>
+              <span className="font-mono text-xs text-text-muted">{organization.id.slice(0, 12)}…</span>
+            </div>
+            <div className="flex items-center justify-between p-3 bg-bg rounded-xl border border-border-theme">
+              <span className="text-text-muted font-medium">Admin</span>
+              <span className="font-bold text-primary">{orgMembers.find(m => m.uid === organization.adminUid)?.name || 'N/A'}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Members */}
+      <div className="bento-card bg-white p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold text-primary">Team Members ({orgMembers.length})</h3>
+          <Badge variant="outline" className="text-xs font-bold border-border-theme">
+            {organization.currentUserCount}/{organization.maxUsers < 999 ? organization.maxUsers : '∞'} seats used
+          </Badge>
+        </div>
+        <div className="space-y-3">
+          {orgMembers.map(member => (
+            <div key={member.uid} className="flex items-center justify-between p-4 bg-bg/30 rounded-xl border border-border-theme/40">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-accent/10 flex items-center justify-center text-accent font-bold text-sm">
+                  {member.name?.charAt(0) || '?'}
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-primary">{member.name}</p>
+                  <p className="text-xs text-text-muted">{member.email}</p>
+                </div>
+              </div>
+              <Badge className={`text-[9px] font-bold border-none ${member.role === 'Admin' ? 'bg-accent/10 text-accent' : 'bg-gray-100 text-gray-600'}`}>
+                {member.role}
+              </Badge>
+            </div>
+          ))}
+          {orgMembers.length === 0 && (
+            <p className="text-sm text-text-muted text-center py-6">No members yet. Team members who sign up with your domain will appear here.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const SettingsPage = ({
+  organization,
+  orgMembers,
+  userProfile,
+  onOrgUpdated,
+}: {
+  organization: Organization | null;
+  orgMembers: OrgMember[];
+  userProfile: UserProfile | null;
+  onOrgUpdated: (org: Organization) => void;
+}) => {
   const [syncStatus, setSyncStatus] = useState({ google: false, microsoft: false });
+  const [firmName, setFirmName] = useState(organization?.name || '');
+  const [paystackSecret, setPaystackSecret] = useState(organization?.paystackSecretKey || '');
+  const [paystackPublic, setPaystackPublic] = useState(organization?.paystackPublicKey || '');
+  const [saving, setSaving] = useState(false);
 
   const handleSync = async (provider: 'google' | 'microsoft') => {
     if (auth.currentUser?.uid === 'guest_user') {
@@ -2103,16 +2765,14 @@ const SettingsPage = () => {
       setSyncStatus({ ...syncStatus, [provider]: true });
       return;
     }
-
     try {
       const endpoint = provider === 'google' ? '/api/auth/google/url' : '/api/auth/microsoft/url';
       const response = await axios.get(endpoint);
-      
       if (response.data?.url) {
         window.open(response.data.url, 'oauth_popup', 'width=600,height=700');
         toast.info(`Connecting to ${provider === 'google' ? 'Gmail' : 'Exchange'}...`);
       }
-    } catch (error) {
+    } catch {
       toast.error(`Failed to start ${provider} sync`);
     }
   };
@@ -2121,85 +2781,79 @@ const SettingsPage = () => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'OAUTH_SYNC_SUCCESS') {
         setSyncStatus(prev => ({ ...prev, [event.data.provider]: true }));
-        toast.success(`${event.data.provider === 'google' ? 'Gmail' : 'Exchange'} successfully synced!`);
+        toast.success(`${event.data.provider === 'google' ? 'Gmail' : 'Exchange'} synced!`);
       }
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
+  const saveFirmSettings = async () => {
+    if (!organization) return;
+    setSaving(true);
+    try {
+      const updates: Record<string, any> = {};
+      if (firmName.trim() && firmName !== organization.name) updates.name = firmName.trim();
+      if (paystackSecret !== organization.paystackSecretKey) updates.paystackSecretKey = paystackSecret;
+      if (paystackPublic !== organization.paystackPublicKey) updates.paystackPublicKey = paystackPublic;
+
+      if (Object.keys(updates).length > 0) {
+        await updateDoc(doc(db, 'organizations', organization.id), updates);
+        onOrgUpdated({ ...organization, ...updates });
+        toast.success('Firm settings saved.');
+      } else {
+        toast.info('No changes to save.');
+      }
+    } catch {
+      toast.error('Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Email Sync */}
         <div className="bento-card bg-white p-6">
           <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600">
-              <RefreshCw size={20} />
-            </div>
+            <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600"><RefreshCw size={20} /></div>
             <h3 className="text-lg font-bold text-primary">Account Synchronization</h3>
           </div>
-          
           <div className="space-y-4">
-            <div className={`p-4 rounded-2xl border transition-all ${syncStatus.google ? 'bg-green-50 border-green-200' : 'bg-bg border-border-theme'}`}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-white rounded-full shadow-sm flex items-center justify-center border border-gray-100">
-                    <Mail size={18} className="text-red-500" />
+            {[
+              { key: 'google' as const, label: 'Google Workspace', sub: 'Sync Gmail, Calendar, and Drive', icon: <Mail size={18} className="text-red-500" /> },
+              { key: 'microsoft' as const, label: 'Microsoft Exchange', sub: 'Sync Outlook and Calendars', icon: <LayoutDashboard size={18} className="text-blue-600" /> },
+            ].map(({ key, label, sub, icon }) => (
+              <div key={key} className={`p-4 rounded-2xl border transition-all ${syncStatus[key] ? 'bg-green-50 border-green-200' : 'bg-bg border-border-theme'}`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-white rounded-full shadow-sm flex items-center justify-center border border-gray-100">{icon}</div>
+                    <div>
+                      <p className="text-sm font-bold text-primary">{label}</p>
+                      <p className="text-[10px] text-text-muted">{sub}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-bold text-primary">Google Workspace</p>
-                    <p className="text-[10px] text-text-muted">Sync Gmail, Calendar, and Drive</p>
-                  </div>
+                  <Button onClick={() => handleSync(key)} variant={syncStatus[key] ? 'outline' : 'default'} className={syncStatus[key] ? 'text-green-600 border-green-300' : 'bg-accent text-white'} size="sm">
+                    {syncStatus[key] ? 'Synced' : 'Connect'}
+                  </Button>
                 </div>
-                <Button 
-                  onClick={() => handleSync('google')}
-                  variant={syncStatus.google ? 'outline' : 'default'}
-                  className={syncStatus.google ? 'text-green-600 border-green-300' : 'bg-accent text-white'}
-                  size="sm"
-                >
-                  {syncStatus.google ? 'Synced' : 'Connect'}
-                </Button>
               </div>
-            </div>
-
-            <div className={`p-4 rounded-2xl border transition-all ${syncStatus.microsoft ? 'bg-green-50 border-green-200' : 'bg-bg border-border-theme'}`}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-white rounded-full shadow-sm flex items-center justify-center border border-gray-100">
-                    <LayoutDashboard size={18} className="text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-primary">Microsoft Exchange</p>
-                    <p className="text-[10px] text-text-muted">Sync Outlook and Calendars</p>
-                  </div>
-                </div>
-                <Button 
-                  onClick={() => handleSync('microsoft')}
-                  variant={syncStatus.microsoft ? 'outline' : 'default'}
-                  className={syncStatus.microsoft ? 'text-green-600 border-green-300' : 'bg-accent text-white'}
-                  size="sm"
-                >
-                  {syncStatus.microsoft ? 'Synced' : 'Connect'}
-                </Button>
-              </div>
-            </div>
+            ))}
           </div>
         </div>
 
+        {/* SEO & Marketing */}
         <div className="bento-card bg-white p-6">
           <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-purple-600">
-              <Megaphone size={20} />
-            </div>
+            <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-purple-600"><Megaphone size={20} /></div>
             <h3 className="text-lg font-bold text-primary">SEO & Marketing</h3>
           </div>
-          
           <div className="space-y-4">
             <div className="space-y-2">
               <Label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Firm Website URL</Label>
               <Input placeholder="https://yourlawfirm.com" className="rounded-xl border-border-theme h-11" />
             </div>
-            
             <div className="flex items-center justify-between p-4 bg-bg rounded-2xl border border-border-theme">
               <div>
                 <p className="text-sm font-bold text-primary">Automated Marketing</p>
@@ -2207,54 +2861,137 @@ const SettingsPage = () => {
               </div>
               <Button size="sm" className="bg-primary text-white">Enable</Button>
             </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl">
-                 <p className="text-[10px] font-bold text-amber-800 uppercase mb-1">SEO Health</p>
-                 <p className="text-xl font-black text-amber-900">72%</p>
+                <p className="text-[10px] font-bold text-amber-800 uppercase mb-1">SEO Health</p>
+                <p className="text-xl font-black text-amber-900">72%</p>
               </div>
               <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl">
-                 <p className="text-[10px] font-bold text-blue-800 uppercase mb-1">Lead Capture</p>
-                 <p className="text-xl font-black text-blue-900">High</p>
+                <p className="text-[10px] font-bold text-blue-800 uppercase mb-1">Lead Capture</p>
+                <p className="text-xl font-black text-blue-900">High</p>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="bento-card bg-white">
-        <div className="card-title-theme">Firm Settings</div>
-        <div className="space-y-6 mt-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Firm Name</Label>
-              <Input className="rounded-xl" defaultValue="Caseflo Law Firm" />
+      {/* Firm Settings */}
+      {organization && (
+        <div className="bento-card bg-white p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600"><Building2 size={20} /></div>
+              <h3 className="text-lg font-bold text-primary">Firm Settings</h3>
             </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Primary Jurisdiction</Label>
-              <select className="w-full p-3 border border-border-theme rounded-xl text-sm bg-white outline-none">
-                {NIGERIAN_STATES.map(s => <option key={s.code} value={s.code}>{s.name}</option>)}
-              </select>
-            </div>
+            <Button onClick={saveFirmSettings} disabled={saving} size="sm" className="bg-accent text-white rounded-xl font-bold">
+              {saving ? <RefreshCw className="animate-spin" size={14} /> : <><Save size={14} className="mr-1.5" />Save</>}
+            </Button>
           </div>
-          
-          <div className="pt-6 border-t border-border-theme/50">
-            <h3 className="text-sm font-bold text-primary mb-4">User Management</h3>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between p-4 bg-bg/20 rounded-xl border border-border-theme/30">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center text-accent font-bold">JD</div>
-                  <div>
-                    <p className="text-sm font-bold text-primary">John Doe</p>
-                    <p className="text-xs text-text-muted">Senior Partner</p>
-                  </div>
+
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Firm Name</Label>
+                <Input className="rounded-xl border-border-theme h-11" value={firmName} onChange={e => setFirmName(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Email Domain</Label>
+                <Input className="rounded-xl border-border-theme h-11 bg-bg/50 text-text-muted" value={`@${organization.domain}`} readOnly />
+              </div>
+            </div>
+
+            {/* Paystack Integration */}
+            <div className="pt-6 border-t border-border-theme/50">
+              <div className="flex items-center gap-2 mb-4">
+                <Key size={16} className="text-text-muted" />
+                <h4 className="text-sm font-bold text-primary">Paystack Integration</h4>
+                <Badge variant="outline" className="text-[9px] font-bold ml-1">Optional</Badge>
+              </div>
+              <p className="text-xs text-text-muted mb-4">Set your firm's Paystack keys to route client invoice payments directly to your firm's account.</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Secret Key</Label>
+                  <Input
+                    type="password"
+                    className="rounded-xl border-border-theme h-11 font-mono text-sm"
+                    placeholder="sk_live_••••••••••••••••"
+                    value={paystackSecret}
+                    onChange={e => setPaystackSecret(e.target.value)}
+                  />
                 </div>
-                <Badge className="bg-green-100 text-green-700 border-none text-[10px] font-bold">Admin</Badge>
+                <div className="space-y-2">
+                  <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Public Key</Label>
+                  <Input
+                    className="rounded-xl border-border-theme h-11 font-mono text-sm"
+                    placeholder="pk_live_••••••••••••••••"
+                    value={paystackPublic}
+                    onChange={e => setPaystackPublic(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Team Members */}
+            <div className="pt-6 border-t border-border-theme/50">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-sm font-bold text-primary">Team Members</h4>
+                <span className="text-xs text-text-muted">{organization.currentUserCount}/{organization.maxUsers < 999 ? organization.maxUsers : '∞'} seats</span>
+              </div>
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl mb-3 text-xs font-medium text-blue-800">
+                To invite someone: ask them to open the app, click <strong>"New team member joining an existing workspace?"</strong> on the Sign In screen, and register with their <strong>@{organization.domain}</strong> email — they'll auto-join.
+              </div>
+              <div className="space-y-2">
+                {orgMembers.map(m => {
+                  const isMe = m.uid === userProfile?.uid;
+                  const isOrgAdmin = m.uid === organization.adminUid;
+                  const removeMember = async () => {
+                    if (!window.confirm(`Remove ${m.name} from the workspace?`)) return;
+                    try {
+                      await deleteDoc(doc(db, 'organizations', organization.id, 'members', m.uid));
+                      await updateDoc(doc(db, 'organizations', organization.id), {
+                        currentUserCount: Math.max(0, organization.currentUserCount - 1)
+                      });
+                      await updateDoc(doc(db, 'users', m.uid), { orgId: '' }).catch(() => {});
+                      onOrgUpdated({ ...organization, currentUserCount: Math.max(0, organization.currentUserCount - 1) });
+                      toast.success(`${m.name} removed.`);
+                    } catch {
+                      toast.error('Failed to remove member');
+                    }
+                  };
+                  return (
+                    <div key={m.uid} className="flex items-center justify-between p-3 bg-bg/30 rounded-xl border border-border-theme/30">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center text-accent font-bold text-xs">
+                          {m.name?.charAt(0) || '?'}
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-primary">
+                            {m.name}
+                            {isMe && <span className="text-[10px] text-accent font-normal ml-1">(you)</span>}
+                          </p>
+                          <p className="text-xs text-text-muted">{m.email}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge className={`text-[9px] font-bold border-none ${m.role === 'Admin' ? 'bg-accent/10 text-accent' : 'bg-gray-100 text-gray-600'}`}>{m.role}</Badge>
+                        {!isMe && !isOrgAdmin && (
+                          <Button size="sm" variant="ghost" onClick={removeMember}
+                            className="text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg h-7 px-2 text-xs font-bold">
+                            Remove
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {orgMembers.length === 0 && (
+                  <p className="text-xs text-text-muted text-center py-4">No members yet.</p>
+                )}
               </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
@@ -2282,6 +3019,12 @@ function AppContent() {
   const [emails, setEmails] = useState<AutomatedEmail[]>([]);
   const [vettingResults, setVettingResults] = useState<CaseVetting[]>([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Multi-tenant state
+  const [organization, setOrganization] = useState<Organization | null>(null);
+  const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
+  const [orgLoading, setOrgLoading] = useState(true);
+  const [showSubscriptionPage, setShowSubscriptionPage] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -2379,6 +3122,18 @@ function AppContent() {
         displayName: 'Guest Counsel',
         emailVerified: true
       } as any);
+      setOrganization({
+        id: 'guest_org',
+        name: 'Demo Firm',
+        domain: 'caseflo.com',
+        adminUid: 'guest_user',
+        plan: 'professional',
+        maxUsers: 15,
+        currentUserCount: 1,
+        subscriptionStatus: 'active',
+        createdAt: null,
+      });
+      setOrgLoading(false);
       setLoading(false);
       return;
     }
@@ -2393,11 +3148,14 @@ function AppContent() {
   useEffect(() => {
     if (!user) {
       setUserProfile(null);
+      setOrganization(null);
+      setOrgMembers([]);
+      setOrgLoading(false);
       return;
     }
-    
+
     if (user.uid === 'guest_user') {
-      setUserProfile({ uid: 'guest_user', role: 'Admin', email: 'guest@caseflo.com', name: 'Guest Counsel' });
+      setUserProfile({ uid: 'guest_user', orgId: 'guest_org', role: 'Admin', email: 'guest@caseflo.com', name: 'Guest Counsel' });
       setMatters([
         { id: '1', title: 'Smith vs State', clientName: 'John Smith', status: 'open', courtName: 'High Court', courtState: 'Lagos', lawyerInCharge: 'Self', uid: 'guest_user', matterType: 'Civil Litigation' }
       ]);
@@ -2410,32 +3168,88 @@ function AppContent() {
       setTemplates([
         { id: '1', userId: 'guest_user', name: 'Standard Writ of Summons - Lagos', court: 'Lagos State Judiciary', documentType: 'Writ of Summons', defaultStatus: 'draft' }
       ]);
+      setOrgLoading(false);
       return;
     }
 
-    // Fetch user profile for RBAC
-    const fetchProfile = async () => {
+    // Load user profile (includes orgId)
+    const fetchProfileAndOrg = async () => {
       try {
-        const docRef = doc(db, 'users', user.uid);
-        const snap = await getDoc(docRef);
-        if (snap.exists()) {
-          setUserProfile(snap.data() as UserProfile);
+        const profileRef = doc(db, 'users', user.uid);
+        const profileSnap = await getDoc(profileRef);
+
+        let profile: UserProfile;
+        if (profileSnap.exists()) {
+          profile = profileSnap.data() as UserProfile;
         } else {
-          const newProfile: UserProfile = {
+          profile = {
             uid: user.uid,
-            role: 'Admin', // Default to Admin for standard creation, adjustable post-registration
+            role: 'Admin',
             email: user.email || '',
-            name: user.displayName || 'New User'
+            name: user.displayName || 'New User',
           };
-          await setDoc(docRef, { ...newProfile, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
-          setUserProfile(newProfile);
+          await setDoc(profileRef, { ...profile, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+        }
+        setUserProfile(profile);
+
+        // Load org document
+        if (profile.orgId) {
+          const orgSnap = await getDoc(doc(db, 'organizations', profile.orgId));
+          if (orgSnap.exists()) {
+            const org = { id: orgSnap.id, ...orgSnap.data() } as Organization;
+
+            // Check if trial has expired
+            if (org.subscriptionStatus === 'trial' && org.trialEndsAt) {
+              const trialEnd = org.trialEndsAt.toDate ? org.trialEndsAt.toDate() : new Date(org.trialEndsAt);
+              if (trialEnd < new Date()) {
+                await updateDoc(doc(db, 'organizations', profile.orgId), { subscriptionStatus: 'expired' });
+                org.subscriptionStatus = 'expired';
+              }
+            }
+
+            setOrganization(org);
+
+            // Load members
+            const membersSnap = await getDocs(collection(db, 'organizations', profile.orgId, 'members'));
+            setOrgMembers(membersSnap.docs.map(d => d.data() as OrgMember));
+          }
+        } else {
+          // New user: check if their email domain has an existing org, then auto-join
+          const domain = user.email?.split('@')[1]?.toLowerCase();
+          if (domain) {
+            const orgQ = query(collection(db, 'organizations'), where('domain', '==', domain), limit(1));
+            const orgSnap = await getDocs(orgQ);
+            if (!orgSnap.empty) {
+              const orgDoc = orgSnap.docs[0];
+              const orgData = orgDoc.data();
+              if (orgData.currentUserCount < orgData.maxUsers) {
+                // Auto-join: add member + update user profile
+                await setDoc(doc(db, 'organizations', orgDoc.id, 'members', user.uid), {
+                  uid: user.uid,
+                  email: user.email,
+                  name: user.displayName,
+                  role: 'Lawyer',
+                  joinedAt: serverTimestamp(),
+                });
+                await updateDoc(doc(db, 'organizations', orgDoc.id), { currentUserCount: orgData.currentUserCount + 1 });
+                await updateDoc(profileRef, { orgId: orgDoc.id, updatedAt: serverTimestamp() });
+                profile.orgId = orgDoc.id;
+                setOrganization({ id: orgDoc.id, ...orgData } as Organization);
+              }
+            }
+          }
         }
       } catch (err) {
-        console.error("Failed to load or create profile:", err);
+        console.error('Failed to load profile/org:', err);
+      } finally {
+        setOrgLoading(false);
       }
     };
-    fetchProfile();
 
+    fetchProfileAndOrg();
+
+    // All data queries now scoped by orgId via uid — we use uid initially for backward compat;
+    // org-shared data will be scoped by orgId once the org is loaded in the effect below.
     const mattersQ = query(collection(db, 'matters'), where('uid', '==', user.uid));
     const unsubMatters = onSnapshot(mattersQ, (snap) => {
       setMatters(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Matter)));
@@ -2494,25 +3308,100 @@ function AppContent() {
     };
   }, [user]);
 
-  if (!user || (user && !userProfile)) return (
-    <>
-      {loading ? <div className="flex items-center justify-center min-h-screen bg-bg"><RefreshCw className="animate-spin text-accent" /></div> : <Login />}
-      <Toaster position="bottom-right" />
-    </>
-  );
+  if (loading || (user && user.uid !== 'guest_user' && orgLoading && !organization)) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-bg">
+        <RefreshCw className="animate-spin text-accent" size={28} />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <>
+        <WorkspaceSignIn />
+        <Toaster position="bottom-right" />
+      </>
+    );
+  }
+
+  // Authenticated but no org yet (e.g. Google sign-in first time) — show inline setup
+  if (user.uid !== 'guest_user' && !orgLoading && !organization) {
+    return (
+      <>
+        <OrgSetup user={user} onDone={(org) => setOrganization(org)} />
+        <Toaster position="bottom-right" />
+      </>
+    );
+  }
+
+  // Email verification screen — shown but not blocking so demo flows work
+  // Re-enable this block in production by removing the `false &&` prefix
+  if (false && user.uid !== 'guest_user' && !user.emailVerified) {
+    return (
+      <>
+        <EmailVerificationPending user={user} />
+        <Toaster position="bottom-right" />
+      </>
+    );
+  }
+
+  if (!userProfile) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-bg">
+        <RefreshCw className="animate-spin text-accent" size={28} />
+      </div>
+    );
+  }
+
+  // Show subscription page if needed
+  const subStatus = organization?.subscriptionStatus;
+  const needsSubscription = organization && (subStatus === 'expired' || subStatus === 'cancelled');
+  if ((showSubscriptionPage || needsSubscription) && organization && user.uid !== 'guest_user') {
+    return (
+      <>
+        <SubscriptionPage
+          organization={organization}
+          user={user}
+          onSubscribed={async (plan, expiresAt, maxUsers) => {
+            if (organization.subscriptionStatus === 'trial' && !needsSubscription) {
+              // Just dismiss the upgrade page if still in trial
+              setShowSubscriptionPage(false);
+              return;
+            }
+            try {
+              await updateDoc(doc(db, 'organizations', organization.id), {
+                plan,
+                maxUsers,
+                subscriptionStatus: 'active',
+                subscriptionExpiresAt: new Date(expiresAt),
+              });
+              setOrganization(prev => prev ? { ...prev, plan: plan as any, maxUsers, subscriptionStatus: 'active' } : prev);
+              setShowSubscriptionPage(false);
+              toast.success('Subscription activated! Welcome to Caseflo.');
+            } catch {
+              toast.error('Payment verified but failed to update workspace. Contact support.');
+            }
+          }}
+        />
+        <Toaster position="bottom-right" />
+      </>
+    );
+  }
 
   const allSidebarItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['Admin', 'Lawyer', 'Staff'] },
-    { id: 'matters', label: 'Case Monitoring', icon: Briefcase, roles: ['Admin', 'Lawyer', 'Staff'] },
-    { id: 'templates', label: 'E-Filing Templates', icon: FileBadge, roles: ['Admin', 'Lawyer'] },
-    { id: 'efiling', label: 'E-Filing Portal', icon: FileUp, roles: ['Admin', 'Lawyer'] },
-    { id: 'vetting', label: 'AI Case Vetting', icon: History, roles: ['Admin', 'Lawyer'] },
-    { id: 'onboarding', label: 'Client Onboarding', icon: UserPlus, roles: ['Admin', 'Lawyer', 'Staff'] },
-    { id: 'appointments', label: 'Calendar', icon: Calendar, roles: ['Admin', 'Lawyer', 'Staff'] },
-    { id: 'followups', label: 'Follow-ups', icon: MessageSquare, roles: ['Admin', 'Lawyer', 'Staff'] },
-    { id: 'automation', label: 'Automation Logs', icon: Send, roles: ['Admin', 'Staff'] },
-    { id: 'billing', label: 'Billing', icon: DollarSign, roles: ['Admin', 'Staff'] },
-    { id: 'settings', label: 'Settings', icon: Settings, roles: ['Admin'] },
+    { id: 'dashboard',    label: 'Dashboard',         icon: LayoutDashboard, roles: ['Admin', 'Lawyer', 'Staff'] },
+    { id: 'matters',      label: 'Case Monitoring',    icon: Briefcase,       roles: ['Admin', 'Lawyer', 'Staff'] },
+    { id: 'templates',    label: 'E-Filing Templates', icon: FileBadge,       roles: ['Admin', 'Lawyer'] },
+    { id: 'efiling',      label: 'E-Filing Portal',    icon: FileUp,          roles: ['Admin', 'Lawyer'] },
+    { id: 'vetting',      label: 'AI Case Vetting',    icon: History,         roles: ['Admin', 'Lawyer'] },
+    { id: 'onboarding',   label: 'Client Onboarding',  icon: UserPlus,        roles: ['Admin', 'Lawyer', 'Staff'] },
+    { id: 'appointments', label: 'Calendar',            icon: Calendar,        roles: ['Admin', 'Lawyer', 'Staff'] },
+    { id: 'followups',    label: 'Follow-ups',          icon: MessageSquare,   roles: ['Admin', 'Lawyer', 'Staff'] },
+    { id: 'automation',   label: 'Automation Logs',    icon: Send,            roles: ['Admin', 'Staff'] },
+    { id: 'billing',      label: 'Billing',             icon: DollarSign,      roles: ['Admin', 'Staff'] },
+    { id: 'subscription', label: 'Subscription',        icon: Crown,           roles: ['Admin'] },
+    { id: 'settings',     label: 'Settings',            icon: Settings,        roles: ['Admin'] },
   ];
 
   const sidebarItems = allSidebarItems.filter(item => userProfile ? item.roles.includes(userProfile.role) : false);
@@ -2536,7 +3425,10 @@ function AppContent() {
             <div className="w-10 h-10 bg-accent rounded-xl flex items-center justify-center shadow-lg shadow-accent/20 group-hover:scale-110 transition-transform duration-300">
               <Briefcase className="text-white w-5 h-5" />
             </div>
-            <h1 className="text-xl font-extrabold tracking-tight text-primary">Caseflo</h1>
+            <div>
+              <h1 className="text-lg font-extrabold tracking-tight text-primary leading-tight">Caseflo</h1>
+              {organization && <p className="text-[10px] text-text-muted font-medium truncate max-w-[130px]">{organization.name}</p>}
+            </div>
           </div>
           <Button variant="ghost" size="icon" className="lg:hidden text-text-muted hover:bg-bg" onClick={() => setIsMobileMenuOpen(false)}>
              <X size={20} />
@@ -2583,7 +3475,7 @@ function AppContent() {
             variant="ghost" 
             onClick={() => {
               sessionStorage.removeItem('ais_guest_mode');
-              auth.signOut();
+              signOut(auth);
             }}
             className="w-full justify-start gap-3 text-text-muted hover:text-red-600 hover:bg-red-50 rounded-xl font-bold transition-colors"
           >
@@ -2628,6 +3520,10 @@ function AppContent() {
             </div>
           </header>
 
+          {organization && (
+            <SubscriptionBanner organization={organization} onUpgrade={() => setShowSubscriptionPage(true)} />
+          )}
+
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
             {activeTab === 'dashboard' && <Dashboard matters={matters} appointments={appointments} followUps={followUps} />}
             {activeTab === 'matters' && (
@@ -2644,7 +3540,23 @@ function AppContent() {
             {activeTab === 'vetting' && <VettingPage results={vettingResults} matters={matters} />}
             {activeTab === 'followups' && <FollowUpsList followUps={followUps} matters={matters} />}
             {activeTab === 'billing' && <BillingPage invoices={invoices} matters={matters} />}
-            {activeTab === 'settings' && <SettingsPage />}
+            {activeTab === 'subscription' && organization && (
+              <SubscriptionManagementPage
+                organization={organization}
+                orgMembers={orgMembers}
+                user={user}
+                onUpgrade={() => setShowSubscriptionPage(true)}
+                onOrgUpdated={(updated) => setOrganization(updated)}
+              />
+            )}
+            {activeTab === 'settings' && (
+              <SettingsPage
+                organization={organization}
+                orgMembers={orgMembers}
+                userProfile={userProfile}
+                onOrgUpdated={(updated) => setOrganization(updated)}
+              />
+            )}
           </div>
         </div>
       </main>
