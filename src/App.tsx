@@ -175,7 +175,7 @@ interface EFiling {
 interface UserProfile {
   uid: string;
   orgId?: string;
-  role: 'Admin' | 'Lawyer' | 'Staff';
+  role: 'Admin' | 'Lawyer' | 'Paralegal' | 'Staff';
   email: string;
   name: string;
 }
@@ -249,7 +249,7 @@ interface OrgMember {
   uid: string;
   email: string;
   name: string;
-  role: 'Admin' | 'Lawyer' | 'Staff';
+  role: 'Admin' | 'Lawyer' | 'Paralegal' | 'Staff';
   joinedAt: any;
 }
 
@@ -258,8 +258,8 @@ const SUBSCRIPTION_PLANS = [
     id: 'starter' as const,
     name: 'Starter',
     price: 15000,
-    maxUsers: 5,
-    features: ['Up to 5 team members', 'Unlimited matters', 'E-filing access', 'AI case vetting', 'Email support'],
+    maxUsers: 3,
+    features: ['Up to 3 team members', '1,000 messages/month', 'Unlimited matters', 'E-filing access', 'AI case vetting', 'Email support'],
   },
   {
     id: 'professional' as const,
@@ -267,14 +267,14 @@ const SUBSCRIPTION_PLANS = [
     price: 35000,
     maxUsers: 15,
     popular: true,
-    features: ['Up to 15 team members', 'Unlimited matters', 'Priority e-filing', 'Advanced AI vetting', 'Priority support', 'Custom Paystack integration'],
+    features: ['Up to 15 team members', '1,000 messages/month', 'Unlimited matters', 'Priority e-filing', 'Advanced AI vetting', 'Priority support', 'Custom Paystack integration'],
   },
   {
     id: 'enterprise' as const,
     name: 'Enterprise',
     price: 75000,
     maxUsers: 999,
-    features: ['Unlimited team members', 'Unlimited matters', 'Full e-filing suite', 'Advanced AI + vetting', '24/7 support', 'Custom branding', 'Dedicated account manager'],
+    features: ['Unlimited team members', '1,000 messages/month', 'Unlimited matters', 'Full e-filing suite', 'Advanced AI + vetting', '24/7 support', 'Custom branding', 'Dedicated account manager'],
   },
 ];
 
@@ -321,10 +321,13 @@ class ErrorBoundary extends React.Component<any, any> {
   }
 }
 
+const TC_URL = 'https://caseflo.ng/terms'; // update to real URL when available
+
 const WorkspaceSignIn = () => {
   const [mode, setMode] = useState<'signin' | 'register'>('signin');
   // 'existing' = has account, 'join' = new user joining existing workspace
   const [signinMode, setSigninMode] = useState<'existing' | 'join'>('existing');
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -352,6 +355,8 @@ const WorkspaceSignIn = () => {
     }
   };
 
+  const [joinRole, setJoinRole] = useState<'Lawyer' | 'Paralegal' | 'Staff'>('Lawyer');
+
   // Creates a Firebase account ONLY — no org created.
   // fetchProfileAndOrg will auto-detect the domain and join the existing org.
   const handleJoinWorkspace = async (e: React.FormEvent) => {
@@ -361,10 +366,9 @@ const WorkspaceSignIn = () => {
     try {
       const cred = await createUserWithEmailAndPassword(auth, email, password);
       await updateProfile(cred.user, { displayName: name });
-      // Create a minimal user profile — fetchProfileAndOrg will auto-join the org
       await setDoc(doc(db, 'users', cred.user.uid), {
         uid: cred.user.uid,
-        role: 'Lawyer',
+        role: joinRole,
         email: cred.user.email || '',
         name: name.trim(),
         createdAt: serverTimestamp(),
@@ -404,7 +408,7 @@ const WorkspaceSignIn = () => {
         domain,
         adminUid: cred.user.uid,
         plan: 'trial',
-        maxUsers: 5,
+        maxUsers: 3,
         currentUserCount: 1,
         subscriptionStatus: 'trial',
         trialEndsAt,
@@ -509,7 +513,25 @@ const WorkspaceSignIn = () => {
                 <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Password</Label>
                 <Input type="password" className="rounded-xl border-border-theme h-12" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required />
               </div>
-              <Button type="submit" disabled={loading} className="w-full bg-accent hover:bg-accent/90 text-white h-12 rounded-xl font-bold">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={agreedToTerms}
+                  onChange={e => setAgreedToTerms(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-border-theme accent-accent shrink-0"
+                />
+                <span className="text-xs text-text-muted leading-relaxed">
+                  I agree to the{' '}
+                  <a href={TC_URL} target="_blank" rel="noopener noreferrer" className="text-accent font-bold hover:underline">
+                    Terms & Conditions
+                  </a>{' '}
+                  and{' '}
+                  <a href={TC_URL} target="_blank" rel="noopener noreferrer" className="text-accent font-bold hover:underline">
+                    Privacy Policy
+                  </a>
+                </span>
+              </label>
+              <Button type="submit" disabled={loading || !agreedToTerms} className="w-full bg-accent hover:bg-accent/90 text-white h-12 rounded-xl font-bold disabled:opacity-50">
                 {loading ? <RefreshCw className="animate-spin" size={18} /> : 'Sign In'}
               </Button>
               <button type="button" onClick={() => { setSigninMode('join'); setPassword(''); }} className="w-full text-xs text-text-muted hover:text-accent font-medium text-center pt-1">
@@ -539,7 +561,25 @@ const WorkspaceSignIn = () => {
                 <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Password</Label>
                 <Input type="password" className="rounded-xl border-border-theme h-12" placeholder="Min 6 characters" value={password} onChange={e => setPassword(e.target.value)} required />
               </div>
-              <Button type="submit" disabled={loading} className="w-full bg-accent hover:bg-accent/90 text-white h-12 rounded-xl font-bold">
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Your Role</Label>
+                <select
+                  className="w-full p-3 border border-border-theme rounded-xl text-sm bg-white outline-none"
+                  value={joinRole}
+                  onChange={e => setJoinRole(e.target.value as typeof joinRole)}
+                >
+                  <option value="Lawyer">Lawyer</option>
+                  <option value="Paralegal">Paralegal / Intern</option>
+                  <option value="Staff">Staff</option>
+                </select>
+              </div>
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input type="checkbox" checked={agreedToTerms} onChange={e => setAgreedToTerms(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-border-theme accent-accent shrink-0" />
+                <span className="text-xs text-text-muted leading-relaxed">
+                  I agree to the <a href={TC_URL} target="_blank" rel="noopener noreferrer" className="text-accent font-bold hover:underline">Terms & Conditions</a> and <a href={TC_URL} target="_blank" rel="noopener noreferrer" className="text-accent font-bold hover:underline">Privacy Policy</a>
+                </span>
+              </label>
+              <Button type="submit" disabled={loading || !agreedToTerms} className="w-full bg-accent hover:bg-accent/90 text-white h-12 rounded-xl font-bold disabled:opacity-50">
                 {loading ? <RefreshCw className="animate-spin" size={18} /> : 'Create Account & Join Workspace'}
               </Button>
               <button type="button" onClick={() => setSigninMode('existing')} className="w-full text-xs text-text-muted hover:text-accent font-medium text-center pt-1">
@@ -571,7 +611,13 @@ const WorkspaceSignIn = () => {
                 <Label className="text-xs font-bold uppercase tracking-widest text-text-muted">Password</Label>
                 <Input type="password" className="rounded-xl border-border-theme h-12" placeholder="Min 6 characters" value={password} onChange={e => setPassword(e.target.value)} required />
               </div>
-              <Button type="submit" disabled={loading} className="w-full bg-accent hover:bg-accent/90 text-white h-12 rounded-xl font-bold">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input type="checkbox" checked={agreedToTerms} onChange={e => setAgreedToTerms(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-border-theme accent-accent shrink-0" />
+                <span className="text-xs text-text-muted leading-relaxed">
+                  I agree to the <a href={TC_URL} target="_blank" rel="noopener noreferrer" className="text-accent font-bold hover:underline">Terms & Conditions</a> and <a href={TC_URL} target="_blank" rel="noopener noreferrer" className="text-accent font-bold hover:underline">Privacy Policy</a>
+                </span>
+              </label>
+              <Button type="submit" disabled={loading || !agreedToTerms} className="w-full bg-accent hover:bg-accent/90 text-white h-12 rounded-xl font-bold disabled:opacity-50">
                 {loading ? <RefreshCw className="animate-spin" size={18} /> : 'Create Workspace'}
               </Button>
             </form>
@@ -611,7 +657,7 @@ const OrgSetup = ({ user, onDone }: { user: FirebaseUser; onDone: (org: Organiza
         domain,
         adminUid: user.uid,
         plan: 'trial',
-        maxUsers: 5,
+        maxUsers: 3,
         currentUserCount: 1,
         subscriptionStatus: 'trial',
         trialEndsAt,
@@ -642,7 +688,7 @@ const OrgSetup = ({ user, onDone }: { user: FirebaseUser; onDone: (org: Organiza
         domain,
         adminUid: user.uid,
         plan: 'trial',
-        maxUsers: 5,
+        maxUsers: 3,
         currentUserCount: 1,
         subscriptionStatus: 'trial',
         trialEndsAt,
@@ -2153,10 +2199,64 @@ const EFilingsPage = ({ filings, orgId }: { filings: EFiling[], orgId: string })
   );
 };
 
+const TEMPLATE_LIBRARY = [
+  // Federal Courts
+  { name: 'Originating Summons',        court: 'Federal High Court',                  documentType: 'Originating Summons',        defaultStatus: 'draft' },
+  { name: 'Writ of Summons',            court: 'Federal High Court',                  documentType: 'Writ of Summons',            defaultStatus: 'draft' },
+  { name: 'Statement of Claim',         court: 'Federal High Court',                  documentType: 'Statement of Claim',         defaultStatus: 'draft' },
+  { name: 'Motion on Notice',           court: 'Federal High Court',                  documentType: 'Motion on Notice',           defaultStatus: 'draft' },
+  { name: 'Motion Ex-Parte',            court: 'Federal High Court',                  documentType: 'Motion Ex-Parte',            defaultStatus: 'draft' },
+  { name: 'Written Address',            court: 'Federal High Court',                  documentType: 'Written Address',            defaultStatus: 'draft' },
+  { name: 'Counter-Affidavit',          court: 'Federal High Court',                  documentType: 'Counter-Affidavit',          defaultStatus: 'draft' },
+  // Court of Appeal
+  { name: 'Notice of Appeal',           court: 'Court of Appeal',                     documentType: 'Notice of Appeal',           defaultStatus: 'draft' },
+  { name: 'Appellant\'s Brief',         court: 'Court of Appeal',                     documentType: 'Appellant\'s Brief',         defaultStatus: 'draft' },
+  { name: 'Respondent\'s Brief',        court: 'Court of Appeal',                     documentType: 'Respondent\'s Brief',        defaultStatus: 'draft' },
+  // Lagos State
+  { name: 'Writ of Summons (Lagos)',    court: 'Lagos State Judiciary',               documentType: 'Writ of Summons',            defaultStatus: 'draft' },
+  { name: 'Originating Summons (Lagos)',court: 'Lagos State Judiciary',               documentType: 'Originating Summons',        defaultStatus: 'draft' },
+  { name: 'Bail Application (Lagos)',   court: 'Lagos State Judiciary',               documentType: 'Bail Application',           defaultStatus: 'draft' },
+  { name: 'Judgment Enforcement',       court: 'Lagos State Judiciary',               documentType: 'Judgment Enforcement Notice',defaultStatus: 'draft' },
+  // Abuja / FCT
+  { name: 'Writ of Summons (FCT)',      court: 'High Court of the FCT',              documentType: 'Writ of Summons',            defaultStatus: 'draft' },
+  { name: 'Originating Application',   court: 'High Court of the FCT',              documentType: 'Originating Application',    defaultStatus: 'draft' },
+  // Criminal
+  { name: 'Charge Sheet',              court: 'Federal High Court',                  documentType: 'Charge Sheet',               defaultStatus: 'draft' },
+  { name: 'Plea of Guilty',            court: 'Federal High Court',                  documentType: 'Plea of Guilty',             defaultStatus: 'draft' },
+  // Commercial
+  { name: 'Petition (Winding Up)',     court: 'Federal High Court',                  documentType: 'Winding-Up Petition',        defaultStatus: 'draft' },
+  { name: 'Arbitration Clause',        court: 'Federal High Court',                  documentType: 'Arbitration Agreement',      defaultStatus: 'draft' },
+];
+
 const TemplatesPage = ({ templates, orgId }: { templates: CaseTemplate[], orgId: string }) => {
   const [showNew, setShowNew] = useState(false);
   const [newTemplate, setNewTemplate] = useState({ name: '', court: '', documentType: '', defaultStatus: 'draft' });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [view, setView] = useState<'mine' | 'library'>('mine');
+  const [librarySearch, setLibrarySearch] = useState('');
+  const [addingTemplate, setAddingTemplate] = useState<string | null>(null);
+
+  const filteredLibrary = TEMPLATE_LIBRARY.filter(t =>
+    !librarySearch ||
+    t.name.toLowerCase().includes(librarySearch.toLowerCase()) ||
+    t.court.toLowerCase().includes(librarySearch.toLowerCase()) ||
+    t.documentType.toLowerCase().includes(librarySearch.toLowerCase())
+  );
+
+  const addFromLibrary = async (t: typeof TEMPLATE_LIBRARY[number]) => {
+    const user = auth.currentUser;
+    if (!user || user.uid === 'guest_user') { toast.info('Sign in to save templates'); return; }
+    setAddingTemplate(t.name);
+    try {
+      const ref = doc(collection(db, 'caseTemplates'));
+      await setDoc(ref, { userId: user.uid, orgId, name: t.name, court: t.court, documentType: t.documentType, defaultStatus: t.defaultStatus });
+      toast.success(`"${t.name}" added to your templates`);
+    } catch {
+      toast.error('Failed to add template');
+    } finally {
+      setAddingTemplate(null);
+    }
+  };
 
   const handleCreateTemplate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2251,32 +2351,85 @@ const TemplatesPage = ({ templates, orgId }: { templates: CaseTemplate[], orgId:
         </Dialog>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {templates.length === 0 ? (
-          <div className="col-span-full py-12 text-center text-text-muted font-medium bg-bg/50 rounded-2xl border border-dashed border-border-theme">
-            No templates configured yet.
-          </div>
-        ) : templates.map(t => (
-          <div key={t.id} className="bento-card bg-white group hover:border-accent/30 transition-colors relative flex flex-col justify-between">
-             <div className="absolute top-4 right-4 transition-opacity md:opacity-0 group-hover:opacity-100">
+      {/* View toggle */}
+      <div className="flex bg-bg rounded-xl p-1 gap-1 w-fit">
+        <button onClick={() => setView('mine')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${view === 'mine' ? 'bg-white text-primary shadow-sm' : 'text-text-muted hover:text-primary'}`}>
+          My Templates ({templates.length})
+        </button>
+        <button onClick={() => setView('library')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${view === 'library' ? 'bg-white text-primary shadow-sm' : 'text-text-muted hover:text-primary'}`}>
+          Template Library ({TEMPLATE_LIBRARY.length})
+        </button>
+      </div>
+
+      {/* My Templates */}
+      {view === 'mine' && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {templates.length === 0 ? (
+            <div className="col-span-full py-12 text-center space-y-3">
+              <p className="text-text-muted font-medium">No templates saved yet.</p>
+              <button onClick={() => setView('library')} className="text-sm font-bold text-accent hover:underline">
+                Browse the template library to get started →
+              </button>
+            </div>
+          ) : templates.map(t => (
+            <div key={t.id} className="bento-card bg-white group hover:border-accent/30 transition-colors relative flex flex-col justify-between">
+              <div className="absolute top-4 right-4 transition-opacity md:opacity-0 group-hover:opacity-100">
                 <Button variant="ghost" size="icon" onClick={() => handleDeleteTemplate(t.id)} className="h-8 w-8 text-text-muted hover:text-red-600 hover:bg-red-50 rounded-lg">
-                   <Trash2 size={14} />
+                  <Trash2 size={14} />
                 </Button>
-             </div>
-             <div>
-              <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center mb-4 text-accent">
-                <FileBadge size={20} />
               </div>
-              <h3 className="font-bold text-primary mb-1">{t.name}</h3>
-              <p className="text-xs text-text-muted">{t.documentType}</p>
-             </div>
-             <div className="mt-4 pt-4 border-t border-border-theme flex items-center justify-between text-xs font-medium text-text-muted">
+              <div>
+                <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center mb-4 text-accent"><FileBadge size={20} /></div>
+                <h3 className="font-bold text-primary mb-1">{t.name}</h3>
+                <p className="text-xs text-text-muted">{t.documentType}</p>
+              </div>
+              <div className="mt-4 pt-4 border-t border-border-theme flex items-center justify-between text-xs font-medium text-text-muted">
                 <span>{t.court.replace(' Judiciary', '')}</span>
                 <Badge variant="outline" className="bg-bg/50">{t.defaultStatus}</Badge>
-             </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Template Library */}
+      {view === 'library' && (
+        <div className="space-y-4">
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+            <input
+              type="text"
+              placeholder="Search templates..."
+              value={librarySearch}
+              onChange={e => setLibrarySearch(e.target.value)}
+              className="w-full pl-9 pr-4 py-2.5 border border-border-theme rounded-xl text-sm outline-none bg-white focus:border-accent/50"
+            />
           </div>
-        ))}
-      </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {filteredLibrary.map(t => {
+              const alreadySaved = templates.some(st => st.name === t.name && st.court === t.court);
+              return (
+                <div key={t.name + t.court} className="bg-white border border-border-theme rounded-2xl p-5 flex flex-col justify-between hover:border-accent/30 transition-colors">
+                  <div>
+                    <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center mb-3 text-slate-500"><FileBadge size={18} /></div>
+                    <h3 className="font-bold text-primary text-sm mb-1">{t.name}</h3>
+                    <p className="text-xs text-text-muted">{t.documentType}</p>
+                    <p className="text-[10px] text-text-muted mt-1 font-medium">{t.court.replace(' Judiciary', '')}</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => addFromLibrary(t)}
+                    disabled={alreadySaved || addingTemplate === t.name}
+                    className={`mt-4 w-full rounded-xl text-xs font-bold h-8 ${alreadySaved ? 'bg-green-100 text-green-700 cursor-default' : 'bg-accent/10 text-accent hover:bg-accent hover:text-white'}`}
+                  >
+                    {alreadySaved ? <><Check size={12} className="mr-1" />Saved</> : addingTemplate === t.name ? <RefreshCw size={12} className="animate-spin" /> : <><Plus size={12} className="mr-1" />Add to My Templates</>}
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -2982,7 +3135,7 @@ const SettingsPage = ({
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Badge className={`text-[9px] font-bold border-none ${m.role === 'Admin' ? 'bg-accent/10 text-accent' : 'bg-gray-100 text-gray-600'}`}>{m.role}</Badge>
+                        <Badge className={`text-[9px] font-bold border-none ${m.role === 'Admin' ? 'bg-accent/10 text-accent' : m.role === 'Paralegal' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>{m.role}</Badge>
                         {!isMe && !isOrgAdmin && (
                           <Button size="sm" variant="ghost" onClick={removeMember}
                             className="text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg h-7 px-2 text-xs font-bold">
@@ -3415,14 +3568,14 @@ function AppContent() {
   }
 
   const allSidebarItems = [
-    { id: 'dashboard',    label: 'Dashboard',         icon: LayoutDashboard, roles: ['Admin', 'Lawyer', 'Staff'] },
-    { id: 'matters',      label: 'Case Monitoring',    icon: Briefcase,       roles: ['Admin', 'Lawyer', 'Staff'] },
-    { id: 'templates',    label: 'E-Filing Templates', icon: FileBadge,       roles: ['Admin', 'Lawyer'] },
-    { id: 'efiling',      label: 'E-Filing Portal',    icon: FileUp,          roles: ['Admin', 'Lawyer'] },
-    { id: 'vetting',      label: 'AI Case Vetting',    icon: History,         roles: ['Admin', 'Lawyer'] },
-    { id: 'onboarding',   label: 'Client Onboarding',  icon: UserPlus,        roles: ['Admin', 'Lawyer', 'Staff'] },
-    { id: 'appointments', label: 'Calendar',            icon: Calendar,        roles: ['Admin', 'Lawyer', 'Staff'] },
-    { id: 'followups',    label: 'Follow-ups',          icon: MessageSquare,   roles: ['Admin', 'Lawyer', 'Staff'] },
+    { id: 'dashboard',    label: 'Dashboard',         icon: LayoutDashboard, roles: ['Admin', 'Lawyer', 'Paralegal', 'Staff'] },
+    { id: 'matters',      label: 'Case Monitoring',    icon: Briefcase,       roles: ['Admin', 'Lawyer', 'Paralegal', 'Staff'] },
+    { id: 'templates',    label: 'E-Filing Templates', icon: FileBadge,       roles: ['Admin', 'Lawyer', 'Paralegal'] },
+    { id: 'efiling',      label: 'E-Filing Portal',    icon: FileUp,          roles: ['Admin', 'Lawyer', 'Paralegal'] },
+    { id: 'vetting',      label: 'AI Case Vetting',    icon: History,         roles: ['Admin', 'Lawyer', 'Paralegal'] },
+    { id: 'onboarding',   label: 'Client Onboarding',  icon: UserPlus,        roles: ['Admin', 'Lawyer', 'Paralegal', 'Staff'] },
+    { id: 'appointments', label: 'Calendar',            icon: Calendar,        roles: ['Admin', 'Lawyer', 'Paralegal', 'Staff'] },
+    { id: 'followups',    label: 'Follow-ups',          icon: MessageSquare,   roles: ['Admin', 'Lawyer', 'Paralegal', 'Staff'] },
     { id: 'automation',   label: 'Automation Logs',    icon: Send,            roles: ['Admin', 'Staff'] },
     { id: 'billing',      label: 'Billing',             icon: DollarSign,      roles: ['Admin', 'Staff'] },
     { id: 'subscription', label: 'Subscription',        icon: Crown,           roles: ['Admin'] },

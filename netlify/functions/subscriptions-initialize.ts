@@ -2,7 +2,7 @@ import type { Handler } from '@netlify/functions';
 import axios from 'axios';
 
 const PLAN_CONFIG = {
-  starter:      { name: 'Starter',      price: 15000, maxUsers: 5   },
+  starter:      { name: 'Starter',      price: 15000, maxUsers: 3   },
   professional: { name: 'Professional', price: 35000, maxUsers: 15  },
   enterprise:   { name: 'Enterprise',   price: 75000, maxUsers: 999 },
 } as const;

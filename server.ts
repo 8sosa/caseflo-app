@@ -13,7 +13,7 @@ const PAYSTACK_URL = `${PAYSTACK_BASE}/transaction/initialize`;
 const PAYSTACK_VERIFY_URL = `${PAYSTACK_BASE}/transaction/verify`;
 
 const PLAN_CONFIG = {
-  starter:      { name: 'Starter',      price: 15000, maxUsers: 5  },
+  starter:      { name: 'Starter',      price: 15000, maxUsers: 3  },
   professional: { name: 'Professional', price: 35000, maxUsers: 15 },
   enterprise:   { name: 'Enterprise',   price: 75000, maxUsers: 999 },
 } as const;
